@@ -74,26 +74,27 @@ def save_characters(session: Session, project_id: str, characters_data: List[dic
     session.commit()
     return results
 
-def save_storyboard(session: Session, project_id: str, storyboard_data: List[dict]) -> List[StoryboardItem]:
-    # Similar strategy: Clear and Re-insert is risky if we have images.
-    # But storyboard is sequential.
-    # Let's delete all and re-insert for now as "Regenerate JSON" usually means fresh start.
-    # IF the user is just editing JSON text, we replace everything.
-    
-    # Check if there are existing items with images we want to preserve?
-    # Ideally, we should try to map them back, but it's hard if sequence changes.
-    # For now: delete all items for this project and insert new.
-    
+def save_storyboard(session: Session, project_id: str, storyboard_data: List[dict], chapter_id: Optional[int] = None) -> List[StoryboardItem]:
     statement = select(StoryboardItem).where(StoryboardItem.project_id == project_id)
+    if chapter_id is not None:
+        statement = statement.where(StoryboardItem.chapter_id == chapter_id)
+
     existing_items = session.exec(statement).all()
     for item in existing_items:
         session.delete(item)
-    
+
     results = []
     for i, item_data in enumerate(storyboard_data):
-        new_item = StoryboardItem(project_id=project_id, sequence=i+1, data=item_data)
+        selected_outfits = item_data.get("selected_outfits") if isinstance(item_data, dict) else None
+        new_item = StoryboardItem(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            sequence=i + 1,
+            data=item_data,
+            selected_outfits=selected_outfits or {},
+        )
         session.add(new_item)
         results.append(new_item)
-        
+
     session.commit()
     return results
