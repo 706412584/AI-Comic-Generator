@@ -22,7 +22,11 @@ backend/comic_app.db
 backend/*.db
 backend/static/*.png
 
-# Alembic
-backend/alembic.ini
-backend/alembic/
 .trae/
+
+# Build artifacts
+build/
+*.spec.bak
+
+# Playwright MCP logs
+.playwright-mcp/
