@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Any
 
@@ -51,15 +52,44 @@ class ChapterAdaptationAgent(BaseAgent):
         context.state["_context_prompt"] = context_prompt
         return {"context_prompt_length": len(context_prompt)}
 
+    STREAM_UPDATE_INTERVAL_SECONDS = 1.5
+    STREAM_PREVIEW_MAX_CHARS = 3000
+
     def _step_generate_content(self, context: AgentContext) -> dict[str, Any]:
         context_prompt = context.state["_context_prompt"]
         user_input = context.input_payload.get("user_input") or ""
-        generated_content = self._generate_content(context_prompt, user_input)
+        generated_content = self._generate_content(
+            context_prompt, user_input, on_delta=self._make_stream_writer(context)
+        )
         context.state["_generated_content"] = generated_content
         return {
             "content_length": len(generated_content or ""),
             "word_count": self._word_count(generated_content),
         }
+
+    def _make_stream_writer(self, context: AgentContext):
+        """节流地把流式生成的部分正文写入 Task，供 SSE / 前端实时展示；同时检测取消。"""
+        last_flush = {"at": 0.0}
+
+        def on_delta(full_text: str):
+            now = time.monotonic()
+            if now - last_flush["at"] < self.STREAM_UPDATE_INTERVAL_SECONDS:
+                return
+            last_flush["at"] = now
+
+            context.raise_if_cancelled()
+
+            task = context.task
+            task.message = f"正在生成章节正文（已生成 {len(full_text)} 字）..."
+            existing_result = dict(task.result or {})
+            existing_result["stream_preview"] = full_text[-self.STREAM_PREVIEW_MAX_CHARS:]
+            existing_result["stream_chars"] = len(full_text)
+            task.result = existing_result
+            task.updated_at = datetime.utcnow()
+            context.session.add(task)
+            context.session.commit()
+
+        return on_delta
 
     def _step_persist_content(self, context: AgentContext) -> dict[str, Any]:
         chapter = context.state["_chapter"]
@@ -96,8 +126,8 @@ class ChapterAdaptationAgent(BaseAgent):
         context = context_service.build_chapter_context(chapter.project_id, chapter.id)
         return context_service.render_context_prompt(context)
 
-    def _generate_content(self, context_prompt: str, user_input: str = "") -> str:
-        return AIService(self.session).generate_chapter_content(context_prompt, user_input or "")
+    def _generate_content(self, context_prompt: str, user_input: str = "", on_delta=None) -> str:
+        return AIService(self.session).generate_chapter_content(context_prompt, user_input or "", on_delta=on_delta)
 
     def _persist_content(self, chapter: Chapter, generated_content: str, save_version: bool = True) -> Chapter:
         chapter.content = generated_content

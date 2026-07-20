@@ -1,8 +1,9 @@
 import base64
+import json
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Callable, List, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -11,6 +12,14 @@ if TYPE_CHECKING:
     from sqlmodel import Session
 
 logger = logging.getLogger(__name__)
+
+
+class _StreamCallbackError(Exception):
+    """包装 on_delta 回调抛出的异常（如任务取消），避免被回退逻辑吞掉。"""
+
+    def __init__(self, original: Exception):
+        super().__init__(str(original))
+        self.original = original
 
 
 class AIService:
@@ -27,6 +36,107 @@ class AIService:
             return self._generate_text_google(system_prompt, user_input)
 
         raise NotImplementedError(f"Provider {config.provider} not supported yet.")
+
+    def generate_text_stream(
+        self,
+        system_prompt: str,
+        user_input: str,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """流式生成文本。on_delta 每次收到新 token 时以累计全文回调。
+
+        仅 openai_compatible 支持真流式；其他 provider 或流式请求失败（且未收到任何内容）
+        时自动回退到非流式请求。on_delta 抛出的异常（如任务取消）会向上传播并中断请求。
+        """
+        config = self._get_config("text")
+        provider = self._provider_name(config)
+
+        if provider != "openai_compatible":
+            content = self.generate_text(system_prompt, user_input)
+            if on_delta and content:
+                on_delta(content)
+            return content
+
+        try:
+            return self._generate_text_stream_openai_compatible(config, system_prompt, user_input, on_delta)
+        except _StreamCallbackError as exc:
+            raise exc.original
+        except Exception as exc:
+            logger.warning(f"Streaming request failed, falling back to non-streaming: {exc}")
+            return self._generate_text_openai_compatible(config, system_prompt, user_input)
+
+    def _generate_text_stream_openai_compatible(
+        self,
+        config,
+        system_prompt: str,
+        user_input: str,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        payload = {
+            "model": config.model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input},
+            ],
+            "temperature": 0.7,
+            "stream": True,
+        }
+
+        errors = []
+        for url in self._openai_compatible_urls(config.base_url, "/chat/completions"):
+            chunks: list[str] = []
+            try:
+                with requests.post(
+                    url,
+                    headers=self._headers(config.api_key),
+                    json=payload,
+                    timeout=(30, 300),
+                    stream=True,
+                ) as response:
+                    if not response.ok:
+                        try:
+                            data = response.json()
+                        except ValueError:
+                            data = {"raw": response.text}
+                        errors.append(f"{url}: {self._pick_error(data, f'HTTP {response.status_code}')}")
+                        continue
+
+                    for raw_line in response.iter_lines(decode_unicode=True):
+                        if not raw_line or not raw_line.startswith("data:"):
+                            continue
+                        data_str = raw_line[len("data:"):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        try:
+                            delta = chunk["choices"][0].get("delta") or {}
+                        except (KeyError, IndexError, TypeError):
+                            continue
+                        piece = delta.get("content")
+                        if piece:
+                            chunks.append(piece)
+                            if on_delta:
+                                try:
+                                    on_delta("".join(chunks))
+                                except Exception as callback_exc:
+                                    raise _StreamCallbackError(callback_exc) from callback_exc
+
+                content = "".join(chunks)
+                if content:
+                    return content
+                errors.append(f"{url}: stream returned no content")
+            except _StreamCallbackError:
+                raise
+            except requests.RequestException as exc:
+                if chunks:
+                    # 已收到部分内容但连接中断，视为失败让上层回退非流式，避免存半截正文
+                    logger.warning(f"Stream interrupted after {len(chunks)} chunks: {exc}")
+                errors.append(f"{url}: {exc}")
+
+        raise ValueError("OpenAI-compatible stream request failed: " + "; ".join(errors))
 
     def _get_config(self, model_type: str):
         from app.cruds.crud_config import get_active_config
@@ -155,7 +265,12 @@ class AIService:
             f"{user_input}\n\nPlease generate the full storyboard in JSON format as requested.",
         )
 
-    def generate_chapter_content(self, context_prompt: str, user_input: str = "") -> str:
+    def generate_chapter_content(
+        self,
+        context_prompt: str,
+        user_input: str = "",
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> str:
         system_prompt = "你是专业长篇小说与漫画脚本创作助手。请生成结构清晰、可用于漫画改编的章节正文。"
         full_input = f"""
 {context_prompt}
@@ -170,6 +285,8 @@ class AIService:
 4. 不违反世界设定。
 5. 章节结尾留下可继续推进的钩子。
 """.strip()
+        if on_delta is not None:
+            return self.generate_text_stream(system_prompt, full_input, on_delta)
         return self.generate_text(system_prompt, full_input)
 
     def _generate_text_google(self, system_prompt: str, user_input: str) -> str:

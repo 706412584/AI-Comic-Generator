@@ -92,6 +92,85 @@ class OpenAICompatibleAIServiceTest(unittest.TestCase):
         self.assertIn("补充要求", calls[0][2]["messages"][1]["content"])
         self.assertNotIn("storyboard", calls[0][2]["messages"][1]["content"])
 
+    def test_generate_text_stream_accumulates_deltas_and_calls_on_delta(self):
+        config = self.make_config("text")
+        service = self.make_service(config)
+        deltas = []
+
+        class DummyStreamResponse:
+            ok = True
+            status_code = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def iter_lines(self, decode_unicode=True):
+                return iter([
+                    'data: {"choices": [{"delta": {"content": "第一"}}]}',
+                    '',
+                    'data: {"choices": [{"delta": {"content": "段"}}]}',
+                    'data: {"choices": [{"delta": {}}]}',
+                    'data: [DONE]',
+                ])
+
+        def fake_post(url, headers, json, timeout, stream=False):
+            self.assertTrue(stream)
+            self.assertTrue(json["stream"])
+            return DummyStreamResponse()
+
+        with patch("app.services.ai_service.requests.post", fake_post):
+            result = service.generate_text_stream("system", "input", on_delta=deltas.append)
+
+        self.assertEqual(result, "第一段")
+        self.assertEqual(deltas, ["第一", "第一段"])
+
+    def test_generate_text_stream_falls_back_to_non_streaming_on_failure(self):
+        config = self.make_config("text")
+        service = self.make_service(config)
+
+        def fake_post(url, headers, json, timeout, stream=False):
+            if stream or json.get("stream"):
+                raise __import__("requests").RequestException("stream broken")
+            return DummyResponse({"choices": [{"message": {"content": "非流式结果"}}]})
+
+        with patch("app.services.ai_service.requests.post", fake_post):
+            result = service.generate_text_stream("system", "input", on_delta=lambda text: None)
+
+        self.assertEqual(result, "非流式结果")
+
+    def test_generate_text_stream_callback_exception_propagates(self):
+        config = self.make_config("text")
+        service = self.make_service(config)
+
+        class CancelSignal(Exception):
+            pass
+
+        class DummyStreamResponse:
+            ok = True
+            status_code = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def iter_lines(self, decode_unicode=True):
+                return iter(['data: {"choices": [{"delta": {"content": "开始"}}]}'])
+
+        def fake_post(url, headers, json, timeout, stream=False):
+            return DummyStreamResponse()
+
+        def raise_cancel(text):
+            raise CancelSignal("cancelled")
+
+        with patch("app.services.ai_service.requests.post", fake_post):
+            with self.assertRaises(CancelSignal):
+                service.generate_text_stream("system", "input", on_delta=raise_cancel)
+
     def test_generate_image_openai_compatible_decodes_b64_json(self):
         config = self.make_config("image")
         service = self.make_service(config)

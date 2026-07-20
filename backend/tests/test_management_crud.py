@@ -469,7 +469,7 @@ class ManagementCrudTest(unittest.TestCase):
 
         captured = {}
 
-        def fake_generate(self, context_prompt, user_input=''):
+        def fake_generate(self, context_prompt, user_input='', on_delta=None):
             captured['context_prompt'] = context_prompt
             captured['user_input'] = user_input
             return '这是 AI 生成的章节正文\n包含第二段内容。'

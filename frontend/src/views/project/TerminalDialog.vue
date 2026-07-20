@@ -29,6 +29,14 @@
 
       <el-progress :percentage="task.progress || 0" :status="progressStatus(task.status)" :stroke-width="8" />
 
+      <div v-if="streamPreview" class="stream-block">
+        <div class="section-title">
+          实时生成内容
+          <span v-if="isRunning" class="stream-hint">（已生成 {{ streamChars }} 字，流式更新中...）</span>
+        </div>
+        <div class="stream-window" ref="streamRef">{{ streamPreview }}<span v-if="isRunning" class="cursor">_</span></div>
+      </div>
+
       <div class="detail-grid">
         <div class="detail-card">
           <span class="detail-label">任务 ID</span>
@@ -217,6 +225,18 @@ let sseFallbackActive = false
 
 const hasResult = computed(() => task.value?.result && Object.keys(task.value.result).length > 0)
 const formattedResult = computed(() => hasResult.value ? JSON.stringify(task.value.result, null, 2) : '')
+
+const streamRef = ref(null)
+const streamPreview = computed(() => task.value?.result?.stream_preview || '')
+const streamChars = computed(() => task.value?.result?.stream_chars || streamPreview.value.length)
+
+watch(streamPreview, () => {
+  nextTick(() => {
+    if (streamRef.value) {
+      streamRef.value.scrollTop = streamRef.value.scrollHeight
+    }
+  })
+})
 
 const taskSummary = computed(() => buildTaskSummary(task.value, agentRuns.value))
 const failureAdvice = computed(() => getFailureAdvice(task.value))
@@ -838,6 +858,26 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 14px;
   line-height: 1.4;
+}
+
+.stream-hint {
+  color: #909399;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.stream-window {
+  background-color: #1e1e1e;
+  color: #dcdfe6;
+  padding: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #333;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .log-line {
