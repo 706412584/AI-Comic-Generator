@@ -795,6 +795,15 @@ def finish_task(task_id: str, status: str, message: str, result: dict | None = N
     with Session(engine) as task_session:
         task = task_session.get(Task, task_id)
         if task:
+            # 已被用户取消的任务不允许被后续的 completed/failed 覆盖
+            if task.status == "cancelled" and status != "cancelled":
+                logs = list(task.logs) if task.logs else []
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 任务已取消，忽略结果：{message}")
+                task.logs = logs
+                task.updated_at = datetime.utcnow()
+                task_session.add(task)
+                task_session.commit()
+                return
             task.status = status
             task.progress = 100 if status == "completed" else task.progress
             task.message = message
@@ -1563,6 +1572,8 @@ def generate_source_analysis_task(task_id: str, project_id: str, max_chapters: i
                 "max_chapters": max_chapters,
                 "mode": mode,
             }).run()
+            if runtime_result.get("status") == "cancelled":
+                return
             result = runtime_result.get("summary") or {}
             analyzed_count = result.get("analyzed_chapters", 0)
             total_count = result.get("total_chapters", 0)
@@ -1599,6 +1610,8 @@ def generate_source_project_initialization_task(task_id: str, project_id: str):
         try:
             agent = SourceProjectInitAgent(session)
             result = AgentRuntime(session, task_id, agent, {"project_id": project_id}).run()
+            if result.get("status") == "cancelled":
+                return
             finish_task(task_id, "completed", "基于原文的项目初始化完成", result)
         except Exception as e:
             session.rollback()
@@ -1625,6 +1638,8 @@ def generate_chapter_content_task(task_id: str, chapter_id: int, user_input: str
                 "user_input": user_input or "",
                 "save_version": save_version,
             }).run()
+            if result.get("status") == "cancelled":
+                return
             finish_task(task_id, "completed", "章节正文生成完成", result)
         except Exception as e:
             session.rollback()

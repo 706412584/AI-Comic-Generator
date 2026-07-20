@@ -88,6 +88,7 @@ class SourceAnalysisAgent(BaseAgent):
 
         ai = AIService(context.session)
         for index, source_chapter in enumerate(chapters_to_analyze, start=1):
+            context.raise_if_cancelled()
             progress = 10 + int(index / max(len(chapters_to_analyze), 1) * 65)
             self._update_task_progress(
                 context,
@@ -183,6 +184,7 @@ class SourceAnalysisAgent(BaseAgent):
             for index in range(0, len(analyzed_chapters), SOURCE_SUMMARY_CHUNK_SIZE)
         ]
         for index, chapters_chunk in enumerate(chapter_groups, start=1):
+            context.raise_if_cancelled()
             self._update_task_progress(context, 82, f"正在生成分组摘要 {index}/{len(chapter_groups)}...")
             system_prompt, prompt = build_source_chunk_summary_prompt(source_import, chapters_chunk)
             payload = parse_ai_json_object(ai.generate_text(system_prompt, prompt))

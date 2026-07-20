@@ -8,6 +8,10 @@ from sqlmodel import Session
 from app.models.models import AgentRun, Task
 
 
+class TaskCancelledError(Exception):
+    """在 step 执行过程中检测到任务被取消时抛出，由 AgentRuntime 转为 cancelled 状态。"""
+
+
 @dataclass
 class AgentContext:
     session: Session
@@ -16,6 +20,12 @@ class AgentContext:
     input_payload: dict[str, Any] = field(default_factory=dict)
     state: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
+
+    def raise_if_cancelled(self):
+        """长循环（如逐章分析）中调用，检测用户取消并中断当前 step。"""
+        self.session.refresh(self.task)
+        if self.task.status == "cancelled":
+            raise TaskCancelledError("任务已被用户取消")
 
 
 @dataclass(frozen=True)

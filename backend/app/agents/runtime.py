@@ -6,7 +6,7 @@ import json
 
 from sqlmodel import Session
 
-from app.agents.base import AgentContext, BaseAgent
+from app.agents.base import AgentContext, BaseAgent, TaskCancelledError
 from app.models.models import AgentRun, Task
 
 
@@ -90,6 +90,14 @@ class AgentRuntime:
                 "completed_steps": [step.name for step in steps],
                 "summary": context.result or context.state,
             }
+        except TaskCancelledError:
+            self.session.rollback()
+            agent_run.status = "cancelled"
+            agent_run.updated_at = datetime.utcnow()
+            agent_run.finished_at = datetime.utcnow()
+            self.session.add(agent_run)
+            self.session.commit()
+            return {"agent_name": self.agent.name, "status": "cancelled"}
         except Exception as exc:
             agent_run.status = "failed"
             agent_run.error_payload = {
