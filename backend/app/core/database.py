@@ -79,9 +79,40 @@ def _ensure_sqlite_columns():
                 if column_name not in existing_columns:
                     connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
+def _alembic_config():
+    from pathlib import Path
+
+    from alembic.config import Config
+
+    backend_root = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    return config
+
+
 def init_db():
-    SQLModel.metadata.create_all(engine)
-    _ensure_sqlite_columns()
+    """通过 Alembic 管理 schema。
+
+    - 全新数据库：直接 upgrade 到 head 建表。
+    - 引入 Alembic 前的旧数据库（有业务表但无 alembic_version）：先按旧逻辑补齐
+      表和列（一次性过渡），再 stamp 到 head。
+    - 已纳管数据库：正常 upgrade。
+    """
+    from alembic import command
+
+    config = _alembic_config()
+    inspector = inspect(engine)
+    has_business_tables = inspector.has_table("project")
+    has_alembic_version = inspector.has_table("alembic_version")
+
+    if has_business_tables and not has_alembic_version:
+        SQLModel.metadata.create_all(engine)
+        _ensure_sqlite_columns()
+        command.stamp(config, "head")
+        return
+
+    command.upgrade(config, "head")
 
 def get_session():
     with Session(engine) as session:
