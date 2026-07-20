@@ -218,7 +218,16 @@ const agentRuns = ref([])
 const agentRunsLoading = ref(false)
 const agentRunsError = ref('')
 const retrying = ref(false)
-const retryableTaskTypes = new Set(['chapter_content_generation', 'chapter_storyboard', 'source_analysis'])
+const retryableTaskTypes = new Set([
+  'chapter_content_generation',
+  'chapter_storyboard',
+  'source_analysis',
+  'project_initialization',
+  'source_project_initialization',
+  'storyboard',
+  'image_generation',
+  'character_generation'
+])
 let pollingInterval = null
 let taskEventSource = null
 let sseFallbackActive = false

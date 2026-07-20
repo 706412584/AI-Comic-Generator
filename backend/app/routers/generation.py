@@ -1701,6 +1701,7 @@ def initialize_project_from_prompt(
             description="AI 正在生成设定、角色、关系、大纲和章节规划",
             progress=0,
             message="等待 AI 初始化...",
+            input_payload={"project_id": project_id, "user_input": user_input},
         )
         session.add(task)
         session.commit()
@@ -1788,6 +1789,7 @@ def initialize_project_from_source(
             description="AI 正在基于导入小说生成设定、角色、关系、大纲和章节规划",
             progress=0,
             message="等待原文初始化...",
+            input_payload={"project_id": project_id},
         )
         session.add(task)
         session.commit()
@@ -2013,7 +2015,8 @@ def generate_storyboard(
         status="pending", 
         project_id=project_id,
         name="Generate Storyboard",
-        description=f"Generating storyboard based on user input..."
+        description=f"Generating storyboard based on user input...",
+        input_payload={"project_id": project_id, "user_input": user_input},
     )
     session.add(task)
     session.commit()
@@ -2041,7 +2044,8 @@ def generate_all_images(
         status="pending", 
         project_id=project_id,
         name="Batch Generate Images",
-        description="Generating all storyboard images"
+        description="Generating all storyboard images",
+        input_payload={"project_id": project_id},
     )
     session.add(task)
     session.commit()
@@ -2077,7 +2081,8 @@ def generate_all_characters(
         status="pending", 
         project_id=project_id,
         name="Batch Generate Characters",
-        description="Generating all character design sheets"
+        description="Generating all character design sheets",
+        input_payload={"project_id": project_id},
     )
     session.add(task)
     session.commit()
@@ -2103,7 +2108,8 @@ def generate_character(
         status="pending", 
         project_id=char.project_id,
         name=f"Draw Character: {char.name}",
-        description=f"Drawing design sheet for character {char.name}"
+        description=f"Drawing design sheet for character {char.name}",
+        input_payload={"project_id": char.project_id, "character_id": character_id},
     )
     session.add(task)
     session.commit()
@@ -2228,7 +2234,8 @@ def generate_panel(
         status="pending", 
         project_id=item.project_id,
         name=f"Draw Panel: #{item.sequence}",
-        description=f"Drawing panel {item.sequence}"
+        description=f"Drawing panel {item.sequence}",
+        input_payload={"project_id": item.project_id, "item_id": item_id},
     )
     session.add(task)
     session.commit()

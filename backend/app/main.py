@@ -56,6 +56,9 @@ app.include_router(history.router, prefix=f"{settings.API_V1_STR}/history", tags
 @app.on_event("startup")
 def on_startup():
     init_db()
+    from app.services.task_dispatch import recover_interrupted_tasks
+
+    recover_interrupted_tasks()
 
 @app.get("/")
 def read_root():

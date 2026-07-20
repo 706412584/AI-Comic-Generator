@@ -71,7 +71,16 @@ const props = defineProps({
 const emit = defineEmits(['update:isCollapsed', 'open-terminal', 'task-retried'])
 
 const retryingTaskId = ref('')
-const retryableTaskTypes = new Set(['chapter_content_generation', 'chapter_storyboard', 'source_analysis'])
+const retryableTaskTypes = new Set([
+    'chapter_content_generation',
+    'chapter_storyboard',
+    'source_analysis',
+    'project_initialization',
+    'source_project_initialization',
+    'storyboard',
+    'image_generation',
+    'character_generation'
+])
 
 const runningCount = computed(() => {
   return props.tasks.filter(t => ['pending', 'processing'].includes(t.status)).length

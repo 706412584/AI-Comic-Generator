@@ -12,12 +12,10 @@ from app.schemas.schemas import AgentRunRead, TaskRead
 
 router = APIRouter()
 
+from app.services.task_dispatch import RECOVERABLE_TASK_TYPES, run_task
+
 TERMINAL_TASK_STATUSES = {"completed", "failed", "cancelled"}
-SUPPORTED_RETRY_TASK_TYPES = {
-    "chapter_content_generation",
-    "chapter_storyboard",
-    "source_analysis",
-}
+SUPPORTED_RETRY_TASK_TYPES = RECOVERABLE_TASK_TYPES
 
 
 def _json_default(value: Any):
@@ -198,45 +196,12 @@ def retry_task(
     session.commit()
     session.refresh(retry)
 
-    payload = retry.input_payload or {}
+    payload = dict(retry.input_payload or {})
     try:
-        if retry.type == "chapter_content_generation":
-            chapter_id = payload.get("chapter_id")
-            if chapter_id is None:
-                raise ValueError("chapter_id is required")
-            from app.routers.generation import generate_chapter_content_task
-
-            background_tasks.add_task(
-                generate_chapter_content_task,
-                retry.id,
-                int(chapter_id),
-                payload.get("user_input") or "",
-                bool(payload.get("save_version", True)),
-            )
-        elif retry.type == "chapter_storyboard":
-            chapter_id = payload.get("chapter_id")
-            if chapter_id is None:
-                raise ValueError("chapter_id is required")
-            from app.routers.generation import generate_chapter_storyboard_task
-
-            background_tasks.add_task(
-                generate_chapter_storyboard_task,
-                retry.id,
-                int(chapter_id),
-                payload.get("user_input") or "",
-            )
-        elif retry.type == "source_analysis":
-            from app.routers.generation import generate_source_analysis_task
-
-            background_tasks.add_task(
-                generate_source_analysis_task,
-                retry.id,
-                retry.project_id,
-                payload.get("max_chapters", 50),
-                payload.get("mode", "continue"),
-            )
-        else:
-            raise ValueError("Task type does not support retry")
+        if retry.type in ("chapter_content_generation", "chapter_storyboard") and payload.get("chapter_id") is None:
+            raise ValueError("chapter_id is required")
+        payload.setdefault("project_id", retry.project_id)
+        background_tasks.add_task(run_task, retry.id, retry.type, payload)
     except ValueError as exc:
         session.delete(retry)
         session.commit()

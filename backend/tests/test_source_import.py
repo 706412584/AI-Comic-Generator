@@ -541,7 +541,7 @@ class SourceImportTest(unittest.TestCase):
                 input_payload={'chapter_id': 1},
             )
             unsupported_task = Task(
-                type='image_generation',
+                type='chapter_continuity_review',
                 status='failed',
                 project_id=self.project_id,
                 input_payload={'project_id': self.project_id},
