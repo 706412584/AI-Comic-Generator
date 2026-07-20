@@ -176,7 +176,10 @@ const sortedChapters = computed(() => {
 
 const sortedStoryboard = computed(() => {
   if (!props.project.storyboard_items) return []
-  return [...props.project.storyboard_items].sort((a, b) => a.sequence - b.sequence)
+  // data 可能为 null（生成中断/旧数据），统一兜底为空对象，避免模板访问 item.data.xxx 抛错白屏
+  return props.project.storyboard_items
+    .map(item => (item.data ? item : { ...item, data: {} }))
+    .sort((a, b) => a.sequence - b.sequence)
 })
 
 const filteredStoryboard = computed(() => {
@@ -199,8 +202,8 @@ const getChapterLabel = (chapterId) => {
 }
 
 const getPanelCharacters = (itemId) => {
-  const item = props.project.storyboard_items.find(i => i.id === itemId)
-  if (!item || !item.data.characters) return []
+  const item = props.project.storyboard_items?.find(i => i.id === itemId)
+  if (!item || !item.data?.characters) return []
   
   let chars = item.data.characters
   if (typeof chars === 'string') return [chars]
@@ -212,7 +215,7 @@ const getPanelCharacters = (itemId) => {
 
 const openJsonEditor = (item) => {
   currentEditingItem.value = item
-  currentEditorContent.value = JSON.stringify(item.data, null, 2)
+  currentEditorContent.value = JSON.stringify(item.data || {}, null, 2)
   showJsonEditor.value = true
 }
 

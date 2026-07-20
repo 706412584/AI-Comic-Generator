@@ -15,6 +15,7 @@
     <el-tabs v-model="activeTab" class="workflow-tabs">
       <el-tab-pane label="1. 故事与配置" name="story">
         <StoryTab
+          :key="`story-${projectId}`"
           :project="project"
           :project-id="projectId"
           :is-task-running="isTaskRunning"
@@ -136,7 +137,7 @@ import ExportDialog from './project/ExportDialog.vue'
 import TerminalDialog from './project/TerminalDialog.vue'
 
 const route = useRoute()
-const projectId = route.params.id
+const projectId = computed(() => route.params.id)
 
 // Project State
 const project = ref({
@@ -190,6 +191,14 @@ const taskStatusMap = ref(new Map())
 const taskCompletionSignal = ref(null)
 const RUNNING_TASK_STATUSES = new Set(['pending', 'processing'])
 const FINISHED_TASK_STATUSES = new Set(['completed', 'failed'])
+// 完成后会更新设定/章节/关系/记忆/进度数据的任务类型
+const TABS_REFRESH_TASK_TYPES = new Set([
+    'chapter_storyboard',
+    'chapter_content_generation',
+    'project_initialization',
+    'source_project_initialization',
+    'source_analysis'
+])
 
 // Dialog State
 const showMergeDialog = ref(false)
@@ -219,7 +228,7 @@ const isTaskRunning = computed(() => {
 // Fetch Data
 const fetchProject = async () => {
     try {
-        const res = await axios.get(`/api/v1/projects/${projectId}`)
+        const res = await axios.get(`/api/v1/projects/${projectId.value}`)
         // Update fields individually to preserve references where possible, 
         // though replacing the whole object is cleaner if children watch correctly.
         // Our children watch deep or props change, so replacing is fine but might reset some local state if not careful.
@@ -246,24 +255,27 @@ const pollActiveTasks = async () => {
     taskPollingInterval.value = setInterval(checkTasks, 2000)
 }
 
+// 处理中的任务需要周期性刷新项目以显示批量出图的中间结果，
+// 但降低频率，避免每 2s 全量拉项目干扰正在编辑的内容。
+const PROCESSING_REFRESH_INTERVAL_MS = 10000
+let lastProcessingRefreshAt = 0
+
 const checkTasks = async () => {
     try {
-        const res = await axios.get(`/api/v1/tasks/project/${projectId}`)
+        const res = await axios.get(`/api/v1/tasks/project/${projectId.value}`)
         activeTasks.value = res.data.slice(0, 5) // Top 5
-        
-        // Check if we need to refresh project data
-        // If any task completed since last check (we can't easily track "since last check" without state, 
-        // but we can check if any task is processing, or if we just had a completion)
-        
-        const anyProcessing = res.data.some(t => t.status === 'processing')
-        if (anyProcessing) {
-            // Optional: periodically refresh project to see partial updates? 
-            // Or just wait for completion.
-            // Original code refreshed on completion or processing.
-            // Let's refresh only on completion events handled by the watcher below.
-            
-            // To support real-time image updates during batch generation:
-            fetchProject()
+
+        const anyActive = res.data.some(t => RUNNING_TASK_STATUSES.has(t.status))
+        if (anyActive) {
+            const now = Date.now()
+            if (res.data.some(t => t.status === 'processing') && now - lastProcessingRefreshAt >= PROCESSING_REFRESH_INTERVAL_MS) {
+                lastProcessingRefreshAt = now
+                fetchProject()
+            }
+        } else if (taskPollingInterval.value) {
+            // 没有进行中的任务时停止轮询；新任务启动会通过 task-started 事件重新开启。
+            clearInterval(taskPollingInterval.value)
+            taskPollingInterval.value = null
         }
     } catch (e) {
         console.error("Polling error", e)
@@ -302,7 +314,8 @@ watch(activeTasks, (newTasks) => {
         fetchProject()
 
         if (task.status === 'completed') {
-            if (task.type === 'chapter_storyboard') {
+            // 这些任务会写入设定/章节/关系/记忆/进度等数据，完成后需要刷新内容 tab
+            if (TABS_REFRESH_TASK_TYPES.has(task.type)) {
                 refreshContentTabs()
             }
             ElNotification({ title: '任务完成', message: '后台任务已完成，相关内容已刷新', type: 'success' })
@@ -339,8 +352,22 @@ const handleTaskRetried = (task) => {
     }
 }
 
+// 同一组件实例在 /project/A -> /project/B 时会被复用，必须监听路由参数重置全部状态
+watch(projectId, (newId, oldId) => {
+    if (!newId || newId === oldId) return
+    activeTasks.value = []
+    taskStatusMap.value = new Map()
+    taskCompletionSignal.value = null
+    staleTabs.clear()
+    CONTENT_TABS.forEach((name) => { tabKeys[name]++ })
+    loading.value = true
+    fetchProject()
+    pollActiveTasks()
+})
+
 // Lifecycle
 onMounted(() => {
+    loading.value = true
     fetchProject()
     pollActiveTasks()
 })

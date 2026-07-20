@@ -431,6 +431,8 @@ const tasks = ref([])
 const versions = ref([])
 const selectedChapterId = ref(null)
 const chapterContent = ref('')
+// 最近一次从服务端加载/保存的正文，用于脏检查，避免任务完成自动刷新覆盖未保存编辑
+const loadedChapterContent = ref('')
 const chapterGenerateInput = ref('')
 const previewMode = ref('edit')
 const savingContent = ref(false)
@@ -498,6 +500,7 @@ const loadData = async () => {
   if (!chapters.value.length) {
     selectedChapterId.value = null
     chapterContent.value = ''
+    loadedChapterContent.value = ''
     versions.value = []
     return
   }
@@ -510,6 +513,7 @@ const loadData = async () => {
 const loadChapterDetail = async (chapterId) => {
   if (!chapterId) {
     chapterContent.value = ''
+    loadedChapterContent.value = ''
     versions.value = []
     return
   }
@@ -522,6 +526,7 @@ const loadChapterDetail = async (chapterId) => {
   const detail = detailRes.data
   chapters.value = chapters.value.map(item => (item.id === chapterId ? detail : item))
   chapterContent.value = detail.content || ''
+  loadedChapterContent.value = chapterContent.value
   versions.value = versionsRes.data
   currentSourceChapter.value = null
   if (detail.source_chapter_id) {
@@ -548,6 +553,7 @@ const refreshSelectedChapter = async () => {
 watch(selectedChapterId, (chapterId) => {
   if (!chapterId) {
     chapterContent.value = ''
+    loadedChapterContent.value = ''
     versions.value = []
   }
 })
@@ -560,12 +566,18 @@ watch(() => props.taskCompletionSignal, async (task) => {
   handledCompletionIds.add(task.id)
   const completedChapterId = taskChapterId(task)
   const isCurrentChapter = completedChapterId && completedChapterId === normalizeId(selectedChapterId.value)
+  const hasUnsavedEdits = chapterContent.value !== loadedChapterContent.value
 
   try {
     if (task.type === 'chapter_content_generation') {
       if (isCurrentChapter) {
-        await refreshSelectedChapter()
-        ElMessage.success('章节正文已自动刷新')
+        if (hasUnsavedEdits) {
+          await loadData()
+          ElMessage.warning('章节正文已生成，但当前编辑未保存，未自动刷新。请保存后手动刷新查看新内容')
+        } else {
+          await refreshSelectedChapter()
+          ElMessage.success('章节正文已自动刷新')
+        }
       } else {
         await loadData()
       }
@@ -574,7 +586,7 @@ watch(() => props.taskCompletionSignal, async (task) => {
 
     if (task.type === 'chapter_storyboard') {
       await loadData()
-      if (isCurrentChapter) {
+      if (isCurrentChapter && !hasUnsavedEdits) {
         await loadChapterDetail(selectedChapterId.value)
       }
     }

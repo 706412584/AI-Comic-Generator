@@ -280,7 +280,8 @@ watch(() => props.project, (newVal) => {
 
 watch(() => props.taskCompletionSignal, async (task) => {
   if (!task?.id || handledCompletionIds.has(task.id)) return
-  if (task.type !== 'source_analysis') return
+  // 原文分析、基于原文初始化、一句话初始化完成后都需要刷新原文区状态
+  if (!['source_analysis', 'source_project_initialization', 'project_initialization'].includes(task.type)) return
   if (!['completed', 'failed'].includes(task.status)) return
 
   handledCompletionIds.add(task.id)
