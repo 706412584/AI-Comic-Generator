@@ -20,6 +20,7 @@
       "main.cjs",
       "preload.cjs",
       "loading.html",
+      "icon.ico",
       "package.json"
     ],
     "extraResources": [
@@ -29,7 +30,8 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "icon.ico"
     },
     "nsis": {
       "oneClick": false,

@@ -180,6 +180,7 @@ function createMainWindow(port) {
     show: false,
     autoHideMenuBar: true,
     title: 'AI Comic Generator',
+    icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
