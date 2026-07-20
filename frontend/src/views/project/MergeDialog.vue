@@ -1,23 +1,23 @@
 <template>
-  <el-dialog 
-    :model-value="visible" 
+  <el-dialog
+    :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
-    title="Merge Characters" 
+    title="合并角色"
     width="40%"
     @open="resetForm"
   >
     <div class="merge-container">
-      <p class="mb-2">Merge duplicate characters into a target character. Merged characters will be deleted, and character names in the storyboard will be automatically updated to the target character.</p>
+      <p class="mb-2">将重复角色合并到目标角色。被合并的角色会被删除，分镜中的角色名称会自动更新为目标角色。</p>
       
       <el-form label-width="120px">
-        <el-form-item label="Keep Character">
-          <el-select v-model="mergeTargetId" placeholder="Select character to keep (Target)" style="width: 100%">
+        <el-form-item label="保留角色">
+          <el-select v-model="mergeTargetId" placeholder="选择要保留的角色（目标）" style="width: 100%">
             <el-option v-for="c in characters" :key="c.id" :label="c.name" :value="c.id" />
           </el-select>
         </el-form-item>
         
-        <el-form-item label="Merge Source">
-          <el-select v-model="mergeSourceIds" multiple placeholder="Select characters to merge (Will be deleted)" style="width: 100%">
+        <el-form-item label="合并来源">
+          <el-select v-model="mergeSourceIds" multiple placeholder="选择要合并的角色（将被删除）" style="width: 100%">
             <el-option 
               v-for="c in characters" 
               :key="c.id" 
@@ -31,8 +31,8 @@
     </div>
     <template #footer>
       <span class="dialog-footer">
-        <el-button @click="emit('update:visible', false)">Cancel</el-button>
-        <el-button type="primary" @click="confirmMerge" :disabled="!mergeTargetId || !mergeSourceIds.length" :loading="loading">Confirm Merge</el-button>
+        <el-button @click="emit('update:visible', false)">取消</el-button>
+        <el-button type="primary" @click="confirmMerge" :disabled="!mergeTargetId || !mergeSourceIds.length" :loading="loading">确认合并</el-button>
       </span>
     </template>
   </el-dialog>
@@ -67,11 +67,11 @@ const confirmMerge = async () => {
       target_char_id: mergeTargetId.value,
       source_char_ids: mergeSourceIds.value
     })
-    ElMessage.success('Merge successful')
+    ElMessage.success('合并成功')
     emit('update:visible', false)
     emit('merged', { targetId: mergeTargetId.value, sourceIds: mergeSourceIds.value })
   } catch (e) {
-    ElMessage.error('Merge failed: ' + (e.response?.data?.detail || e.message))
+    ElMessage.error('合并失败：' + (e.response?.data?.detail || e.message))
   } finally {
     loading.value = false
   }

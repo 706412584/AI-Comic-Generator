@@ -1,18 +1,18 @@
 <template>
-  <el-dialog 
-    :model-value="visible" 
+  <el-dialog
+    :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
-    title="Export Comic" 
+    title="导出漫画"
     width="30%"
   >
-    <span>Confirm export of current project comic?</span>
+    <span>确认导出当前项目漫画？</span>
     <div class="mt-2">
-      <el-checkbox v-model="splitImages">Auto-split 4-panel storyboard (1:1 split)</el-checkbox>
+      <el-checkbox v-model="splitImages">自动拆分四格分镜（1:1 切分）</el-checkbox>
     </div>
     <template #footer>
       <span class="dialog-footer">
-        <el-button @click="emit('update:visible', false)">Cancel</el-button>
-        <el-button type="primary" @click="confirmExport" :loading="loading">Confirm Export</el-button>
+        <el-button @click="emit('update:visible', false)">取消</el-button>
+        <el-button type="primary" @click="confirmExport" :loading="loading">确认导出</el-button>
       </span>
     </template>
   </el-dialog>
@@ -41,9 +41,9 @@ const confirmExport = async () => {
     })
     window.open(res.data.download_url, '_blank')
     emit('update:visible', false)
-    ElMessage.success('Export download started')
+    ElMessage.success('导出下载已开始')
   } catch (error) {
-    ElMessage.error('Export failed: ' + (error.response?.data?.detail || error.message))
+    ElMessage.error('导出失败：' + (error.response?.data?.detail || error.message))
   } finally {
     loading.value = false
   }

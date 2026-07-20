@@ -1,8 +1,8 @@
 <template>
-  <el-dialog 
-    :model-value="visible" 
+  <el-dialog
+    :model-value="visible"
     @update:model-value="emit('update:visible', $event)"
-    title="Generation History" 
+    title="生成历史"
     width="60%"
     @open="loadHistory"
   >
@@ -10,11 +10,11 @@
       <div v-for="h in historyList" :key="h.id" class="history-item" @click="selectHistoryImage(h)" :class="{ active: isCurrentHistory(h) }">
         <el-image :src="h.image_url" fit="cover" class="history-img" />
         <div class="history-meta">
-          <span class="history-time">{{ new Date(h.created_at + 'Z').toLocaleString() }}</span>
-          <el-tag size="small" v-if="isCurrentHistory(h)" type="success">Current</el-tag>
+          <span class="history-time">{{ new Date(h.created_at + 'Z').toLocaleString('zh-CN') }}</span>
+          <el-tag size="small" v-if="isCurrentHistory(h)" type="success">当前</el-tag>
         </div>
       </div>
-      <div v-if="historyList.length === 0 && !loading" class="empty-history">No History</div>
+      <div v-if="historyList.length === 0 && !loading" class="empty-history">暂无历史</div>
     </div>
   </el-dialog>
 </template>
@@ -43,7 +43,7 @@ const loadHistory = async () => {
     const res = await axios.get(`/api/v1/history/${props.type}/${props.entityId}`)
     historyList.value = res.data
   } catch (e) {
-    ElMessage.error('Failed to load history')
+    ElMessage.error('加载历史失败')
   } finally {
     loading.value = false
   }
@@ -52,11 +52,11 @@ const loadHistory = async () => {
 const selectHistoryImage = async (historyItem) => {
   try {
     await axios.post(`/api/v1/history/select/${historyItem.id}`)
-    ElMessage.success('Image switched')
+    ElMessage.success('图片已切换')
     emit('update:visible', false)
     emit('image-selected')
   } catch (e) {
-    ElMessage.error('Switch failed')
+    ElMessage.error('切换失败')
   }
 }
 

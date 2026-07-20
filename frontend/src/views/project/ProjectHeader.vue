@@ -2,7 +2,7 @@
   <div class="header">
     <h2>{{ title }}</h2>
     <div class="actions">
-      <el-button type="success" @click="emit('export')">Export Comic</el-button>
+      <el-button type="success" @click="emit('export')">导出漫画</el-button>
     </div>
   </div>
 </template>

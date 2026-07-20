@@ -1,5 +1,5 @@
 <template>
-  <div class="project-view" v-loading="loading" element-loading-text="Processing..." element-loading-background="rgba(0, 0, 0, 0.8)">
+  <div class="project-view" v-loading="loading" element-loading-text="处理中..." element-loading-background="rgba(0, 0, 0, 0.8)">
     <ProjectHeader 
       :title="project.title" 
       @export="openExportDialog" 
@@ -9,23 +9,62 @@
       :tasks="activeTasks" 
       v-model:isCollapsed="isTaskManagerCollapsed" 
       @open-terminal="openTerminal"
+      @task-retried="handleTaskRetried"
     />
 
     <el-tabs v-model="activeTab" class="workflow-tabs">
-      <el-tab-pane label="1. Story & Config" name="story">
-        <StoryTab 
-          :project="project" 
-          :project-id="projectId" 
+      <el-tab-pane label="1. 故事与配置" name="story">
+        <StoryTab
+          :project="project"
+          :project-id="projectId"
           :is-task-running="isTaskRunning"
+          :task-completion-signal="taskCompletionSignal"
           @refresh-project="fetchProject"
           @task-started="pollActiveTasks"
         />
       </el-tab-pane>
 
-      <el-tab-pane label="2. Character Studio" name="characters">
-        <CharacterTab 
-          :project="project" 
-          :project-id="projectId" 
+      <el-tab-pane label="2. 设定中心" name="settings">
+        <SettingTab :key="tabKey('settings')" :project-id="projectId" />
+      </el-tab-pane>
+
+      <el-tab-pane label="3. 章节创作" name="chapters">
+        <ChapterTab
+          :key="tabKey('chapters')"
+          :project-id="projectId"
+          :task-completion-signal="taskCompletionSignal"
+          @task-started="pollActiveTasks"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="4. 人物关系" name="relationships">
+        <RelationshipPanel
+          :key="tabKey('relationships')"
+          :project-id="projectId"
+          :project="project"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="5. 当前进度" name="progress">
+        <ProgressPanel
+          :key="tabKey('progress')"
+          :project-id="projectId"
+          :project="project"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="6. 记忆库" name="memory">
+        <MemoryPanel
+          :key="tabKey('memory')"
+          :project-id="projectId"
+          :project="project"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="7. 角色工坊" name="characters">
+        <CharacterTab
+          :project="project"
+          :project-id="projectId"
           :is-task-running="isTaskRunning"
           :image-version="imageVersion"
           @refresh-project="fetchProject"
@@ -35,10 +74,10 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="3. Storyboard Canvas" name="comic">
-        <StoryboardTab 
-          :project="project" 
-          :project-id="projectId" 
+      <el-tab-pane label="8. 分镜画布" name="comic">
+        <StoryboardTab
+          :project="project"
+          :project-id="projectId"
           :is-task-running="isTaskRunning"
           :image-version="imageVersion"
           @refresh-project="fetchProject"
@@ -76,13 +115,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
 import { ElNotification } from 'element-plus'
 
 import ProjectHeader from './project/ProjectHeader.vue'
 import StoryTab from './project/StoryTab.vue'
+import SettingTab from './project/SettingTab.vue'
+import ChapterTab from './project/ChapterTab.vue'
+import RelationshipPanel from './project/RelationshipPanel.vue'
+import ProgressPanel from './project/ProgressPanel.vue'
+import MemoryPanel from './project/MemoryPanel.vue'
 import CharacterTab from './project/CharacterTab.vue'
 import StoryboardTab from './project/StoryboardTab.vue'
 import TaskManager from './project/TaskManager.vue'
@@ -111,10 +155,41 @@ const loading = ref(false)
 const activeTab = ref('story')
 const imageVersion = ref(Date.now())
 
+// 每个内容 tab 有独立的重挂载 key，只由「后台任务完成」驱动，与切换 tab 解耦，
+// 因此普通切换 tab 不会重挂载、不会丢失未保存的编辑。
+// 任务完成时：非当前 tab 立即刷新；当前正在浏览的 tab 记为 stale，待用户离开后再刷新，
+// 避免打断正在进行的编辑。
+const CONTENT_TABS = ['settings', 'chapters', 'relationships', 'progress', 'memory']
+const tabKeys = reactive({ settings: 0, chapters: 0, relationships: 0, progress: 0, memory: 0 })
+const staleTabs = reactive(new Set())
+
+const tabKey = (name) => `${name}-${tabKeys[name]}`
+
+const refreshContentTabs = () => {
+    CONTENT_TABS.forEach((name) => {
+        if (name === activeTab.value) {
+            staleTabs.add(name)
+        } else {
+            tabKeys[name]++
+        }
+    })
+}
+
+watch(activeTab, (_newTab, oldTab) => {
+    if (staleTabs.has(oldTab)) {
+        staleTabs.delete(oldTab)
+        tabKeys[oldTab]++
+    }
+})
+
 // Task State
 const activeTasks = ref([])
 const isTaskManagerCollapsed = ref(true)
 const taskPollingInterval = ref(null)
+const taskStatusMap = ref(new Map())
+const taskCompletionSignal = ref(null)
+const RUNNING_TASK_STATUSES = new Set(['pending', 'processing'])
+const FINISHED_TASK_STATUSES = new Set(['completed', 'failed'])
 
 // Dialog State
 const showMergeDialog = ref(false)
@@ -195,25 +270,52 @@ const checkTasks = async () => {
     }
 }
 
-// Watch tasks for completion
-watch(activeTasks, (newTasks, oldTasks) => {
-    if (oldTasks.length === 0) return
-    
-    const changed = newTasks.some(t => {
-        const old = oldTasks.find(o => o.id === t.id)
-        return t.status === 'completed' && old && old.status !== 'completed'
+const buildTaskCompletionSignal = (task) => ({
+    id: task.id,
+    type: task.type,
+    status: task.status,
+    scope_type: task.scope_type,
+    scope_id: task.scope_id,
+    result: task.result || {},
+    updated_at: task.updated_at
+})
+
+// Watch tasks for completion/failure transitions. Keep an explicit status map because
+// the API returns only the latest tasks and oldTasks can be empty after mount/remount.
+watch(activeTasks, (newTasks) => {
+    const previousStatuses = taskStatusMap.value
+    const nextStatuses = new Map(previousStatuses)
+    const finishedTransitions = []
+
+    newTasks.forEach((task) => {
+        const previousStatus = previousStatuses.get(task.id)
+        if (RUNNING_TASK_STATUSES.has(previousStatus) && FINISHED_TASK_STATUSES.has(task.status)) {
+            finishedTransitions.push(task)
+        }
+        nextStatuses.set(task.id, task.status)
     })
-    
-    if (changed) {
+
+    taskStatusMap.value = nextStatuses
+
+    finishedTransitions.forEach((task) => {
+        taskCompletionSignal.value = buildTaskCompletionSignal(task)
         fetchProject()
-        ElNotification({ title: 'Task Completed', message: 'Background tasks updated', type: 'success' })
-    }
+
+        if (task.status === 'completed') {
+            if (task.type === 'chapter_storyboard') {
+                refreshContentTabs()
+            }
+            ElNotification({ title: '任务完成', message: '后台任务已完成，相关内容已刷新', type: 'success' })
+        } else if (task.status === 'failed') {
+            ElNotification({ title: '任务失败', message: task.message || '后台任务执行失败，请查看任务日志', type: 'error' })
+        }
+    })
 }, { deep: true })
 
 // Actions
 const openExportDialog = () => {
     if (!project.value.characters.length && !project.value.storyboard_items.some(i => i.image_url)) {
-        ElNotification({ title: 'Warning', message: 'No exportable image content', type: 'warning' })
+        ElNotification({ title: '提示', message: '暂无可导出的图片内容', type: 'warning' })
         return
     }
     showExportDialog.value = true
@@ -228,6 +330,13 @@ const openHistory = (type, id) => {
 const openTerminal = (taskId) => {
     currentTerminalTaskId.value = taskId
     showTerminalDialog.value = true
+}
+
+const handleTaskRetried = (task) => {
+    checkTasks()
+    if (task?.id) {
+        currentTerminalTaskId.value = task.id
+    }
 }
 
 // Lifecycle

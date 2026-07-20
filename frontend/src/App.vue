@@ -2,10 +2,10 @@
   <el-config-provider :locale="locale">
     <el-container>
       <el-header class="main-header">
-        <div class="logo">AI Comic Generator</div>
+        <div class="logo">AI 漫画生成器</div>
         <el-menu mode="horizontal" router :default-active="$route.path" class="nav-menu">
-          <el-menu-item index="/">Projects</el-menu-item>
-          <el-menu-item index="/config">Models</el-menu-item>
+          <el-menu-item index="/">项目</el-menu-item>
+          <el-menu-item index="/config">模型配置</el-menu-item>
         </el-menu>
       </el-header>
       <el-main>

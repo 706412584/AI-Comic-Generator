@@ -1,8 +1,8 @@
 <template>
   <div class="home-view">
     <div class="header">
-      <h2>My Projects</h2>
-      <el-button type="primary" @click="openCreateDialog">New Project</el-button>
+      <h2>我的项目</h2>
+      <el-button type="primary" @click="openCreateDialog">新建项目</el-button>
     </div>
 
     <el-row :gutter="20">
@@ -17,26 +17,26 @@
               </div>
             </div>
           </template>
-          <p class="project-desc">{{ project.description || 'No description' }}</p>
+          <p class="project-desc">{{ project.description || '暂无描述' }}</p>
           <div class="footer">
-            <span>{{ new Date(project.updated_at).toLocaleDateString() }}</span>
+            <span>{{ new Date(project.updated_at).toLocaleDateString('zh-CN') }}</span>
           </div>
         </el-card>
       </el-col>
     </el-row>
 
-    <el-dialog v-model="dialogVisible" :title="isEdit ? 'Edit Project' : 'Create New Project'">
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑项目' : '新建项目'">
       <el-form :model="form">
-        <el-form-item label="Title">
+        <el-form-item label="标题">
           <el-input v-model="form.title" />
         </el-form-item>
-        <el-form-item label="Description">
+        <el-form-item label="描述">
           <el-input type="textarea" v-model="form.description" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">Cancel</el-button>
-        <el-button type="primary" @click="saveProject">{{ isEdit ? 'Save' : 'Create' }}</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveProject">{{ isEdit ? '保存' : '创建' }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -59,7 +59,7 @@ const fetchProjects = async () => {
     const res = await axios.get('/api/v1/projects/')
     projects.value = res.data
   } catch (error) {
-    ElMessage.error('Failed to fetch projects')
+    ElMessage.error('获取项目失败')
   }
 }
 
@@ -86,11 +86,11 @@ const saveProject = async () => {
 const createProject = async () => {
   try {
     const res = await axios.post('/api/v1/projects/', form.value)
-    ElMessage.success('Created successfully')
+    ElMessage.success('创建成功')
     dialogVisible.value = false
     goToProject(res.data.id)
   } catch (error) {
-    ElMessage.error('Failed to create project')
+    ElMessage.error('创建项目失败')
   }
 }
 
@@ -100,21 +100,21 @@ const updateProject = async () => {
         title: form.value.title,
         description: form.value.description
     })
-    ElMessage.success('Updated successfully')
+    ElMessage.success('更新成功')
     dialogVisible.value = false
     fetchProjects()
   } catch (error) {
-    ElMessage.error('Failed to update project')
+    ElMessage.error('更新项目失败')
   }
 }
 
 const deleteProject = async (id) => {
   try {
     await axios.delete(`/api/v1/projects/${id}`)
-    ElMessage.success('Deleted successfully')
+    ElMessage.success('删除成功')
     fetchProjects()
   } catch (error) {
-    ElMessage.error('Failed to delete project')
+    ElMessage.error('删除项目失败')
   }
 }
 
