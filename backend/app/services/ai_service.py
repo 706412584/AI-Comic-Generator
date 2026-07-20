@@ -101,6 +101,10 @@ class AIService:
                         errors.append(f"{url}: {self._pick_error(data, f'HTTP {response.status_code}')}")
                         continue
 
+                    # SSE 规范强制 UTF-8；若上游未声明 charset，requests 会按
+                    # Latin-1 解码导致中文乱码，这里显式指定。
+                    response.encoding = "utf-8"
+
                     for raw_line in response.iter_lines(decode_unicode=True):
                         if not raw_line or not raw_line.startswith("data:"):
                             continue
