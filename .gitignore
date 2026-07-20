@@ -27,6 +27,7 @@ backend/static/*.png
 # Build artifacts
 build/
 *.spec.bak
+desktop/build-artifacts/
 
 # Playwright MCP logs
 .playwright-mcp/

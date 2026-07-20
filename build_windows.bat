@@ -25,12 +25,7 @@ python -m pip install -r backend\requirements-build.txt
 if errorlevel 1 exit /b 1
 
 echo Packaging backend server...
-if not exist backend\static mkdir backend\static
-python -m PyInstaller --noconfirm --onedir --name AI-Comic-Generator ^
-  --paths backend ^
-  --add-data "frontend\dist;frontend\dist" ^
-  --add-data "backend\static;static" ^
-  backend\run_server.py
+python -m PyInstaller --noconfirm AI-Comic-Generator.spec
 if errorlevel 1 exit /b 1
 
 echo Done. Run dist\AI-Comic-Generator\AI-Comic-Generator.exe and open http://127.0.0.1:8000

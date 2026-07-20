@@ -8,7 +8,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import init_db
+from app.core.paths import static_dir as resolve_static_dir
 from app.routers import configs, projects, generation, export, tasks, history, management, source
+
+APP_VERSION = "0.2.0"
 
 app = FastAPI(title=settings.PROJECT_NAME)
 
@@ -21,12 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def resource_path(*parts: str) -> Path:
-    if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS).joinpath(*parts)
-    return Path(__file__).resolve().parents[1].joinpath(*parts)
-
-
 def frontend_dist_path() -> Path:
     if hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS).joinpath("frontend", "dist")
@@ -34,8 +31,7 @@ def frontend_dist_path() -> Path:
 
 
 # Mount static files
-static_dir = resource_path("static")
-static_dir.mkdir(parents=True, exist_ok=True)
+static_dir = resolve_static_dir()
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 frontend_dist_dir = frontend_dist_path()
@@ -59,6 +55,11 @@ def on_startup():
     from app.services.task_dispatch import recover_interrupted_tasks
 
     recover_interrupted_tasks()
+
+@app.get(f"{settings.API_V1_STR}/health")
+def health_check():
+    return {"status": "ok", "app": settings.PROJECT_NAME, "version": APP_VERSION}
+
 
 @app.get("/")
 def read_root():

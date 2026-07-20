@@ -3,6 +3,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 from app.core.database import get_session
+from app.core.paths import data_dir
 from app.models.models import Project
 from app.services.image_service import split_comic_page
 
@@ -23,7 +24,7 @@ def export_project(
     if not has_images:
         raise HTTPException(status_code=400, detail="No images generated yet. Cannot export.")
         
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    base_dir = str(data_dir())
     project_static_dir = os.path.join(base_dir, "static", project_id)
     export_dir = os.path.join(project_static_dir, "export")
     

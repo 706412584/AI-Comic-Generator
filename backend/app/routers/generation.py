@@ -31,6 +31,7 @@ from app.services.chapter_state_extraction_service import extract_chapter_state_
 from app.services.chapter_continuity_review_service import ChapterContinuityReviewService
 from app.utils.json_utils import extract_json_blocks
 from app.cruds import crud_project
+from app.core.paths import data_dir
 from app.schemas.schemas import ChapterRead
 import os
 import uuid
@@ -64,7 +65,7 @@ def log_task_event(session, task_id, message):
         logger.error(f"Failed to log task event: {e}")
 
 def save_generated_image(session, project_id, entity_type, entity_id, image_bytes):
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    base_dir = str(data_dir())
     project_static_dir = os.path.join(base_dir, "static", project_id)
 
     sub_dir = "characters" if entity_type == "character" else "panels"
@@ -248,7 +249,7 @@ def generate_storyboard_task(task_id: str, project_id: str, user_input: str):
             
             # --- Save Generated Text to Temp File ---
             import time
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = str(data_dir())
             temp_dir = os.path.join(base_dir, "static", project_id, "temp")
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
@@ -409,7 +410,7 @@ def generate_all_images_task(task_id: str, project_id: str):
             project = session.get(Project, project_id)
             ai = AIService(session)
             
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = str(data_dir())
             static_root = os.path.join(base_dir, "static")
             if not os.path.exists(static_root): os.makedirs(static_root)
 
@@ -2145,7 +2146,7 @@ def generate_panel_task(task_id: str, item_id: int):
             json_prompt += "\n\n use json block as user input prompt to generate 2*2 grid comic image."
 
             context_images = []
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = str(data_dir())
 
             # 1. Find Character Images
             # STRICT POLICY: Only use the currently active character image (p_char.image_url).

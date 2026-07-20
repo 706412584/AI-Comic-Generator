@@ -1,7 +1,23 @@
+import argparse
+import os
+
 import uvicorn
 
 from app.main import app
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AI Comic Generator backend server")
+    parser.add_argument("--host", default=os.environ.get("COMIC_APP_HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("COMIC_APP_PORT", "8000")),
+    )
+    args = parser.parse_args()
+
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    main()

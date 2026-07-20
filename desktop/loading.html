@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Comic Generator</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: #e0e7ff;
+      user-select: none;
+    }
+    .box { text-align: center; }
+    .title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .subtitle { font-size: 13px; color: #a5b4fc; margin-bottom: 24px; }
+    .spinner {
+      width: 36px; height: 36px;
+      margin: 0 auto;
+      border: 3px solid rgba(165, 180, 252, 0.25);
+      border-top-color: #a5b4fc;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="title">AI Comic Generator</div>
+    <div class="subtitle">正在启动本地服务…</div>
+    <div class="spinner"></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "name": "ai-comic-generator-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "AI Comic Generator desktop shell (Electron + FastAPI sidecar)",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron . --dev",
+    "package": "electron-builder --win nsis --publish never",
+    "package:dir": "electron-builder --dir --publish never"
+  },
+  "build": {
+    "appId": "com.ai-comic-generator.desktop",
+    "productName": "AI Comic Generator",
+    "asar": true,
+    "directories": {
+      "output": "build-artifacts"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "loading.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/AI-Comic-Generator",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
