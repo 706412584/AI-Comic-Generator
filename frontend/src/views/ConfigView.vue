@@ -34,11 +34,29 @@
             <el-option label="OpenAI 兼容" value="openai_compatible" />
           </el-select>
         </el-form-item>
-        <el-form-item label="模型名称">
-          <el-input v-model="form.model_name" placeholder="例如：gpt-5.5 / gpt-image-1" />
-        </el-form-item>
         <el-form-item label="API Key">
           <el-input v-model="form.api_key" type="password" show-password />
+        </el-form-item>
+        <el-form-item label="模型名称">
+          <div class="model-row">
+            <el-select
+              v-model="form.model_name"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入模型，例如：gpt-5.5 / gemini-2.5-flash"
+              class="model-select"
+              :loading="fetchingModels"
+            >
+              <el-option
+                v-for="m in availableModels"
+                :key="m.id"
+                :label="m.display_name ? `${m.id}（${m.display_name}）` : m.id"
+                :value="m.id"
+              />
+            </el-select>
+            <el-button :loading="fetchingModels" @click="fetchModels">拉取模型</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.model_type">
@@ -53,8 +71,13 @@
           <el-switch v-model="form.is_active" />
         </el-form-item>
       </el-form>
+      <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'fail'">
+        {{ testResult.message }}
+        <span v-if="testResult.latency_ms != null">（{{ testResult.latency_ms }}ms）</span>
+      </div>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button :loading="testing" @click="testConnection">测试连接</el-button>
         <el-button type="primary" @click="saveConfig">保存</el-button>
       </template>
     </el-dialog>
@@ -69,6 +92,10 @@ import { ElMessage } from 'element-plus'
 const configs = ref([])
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const availableModels = ref([])
+const fetchingModels = ref(false)
+const testing = ref(false)
+const testResult = ref(null)
 const form = ref({
   provider: 'openai_compatible',
   model_name: '',
@@ -102,7 +129,61 @@ const openDialog = (row = null) => {
       is_active: true
     }
   }
+  availableModels.value = []
+  testResult.value = null
   dialogVisible.value = true
+}
+
+const fetchModels = async () => {
+  if (!form.value.api_key) {
+    ElMessage.warning('请先填写 API Key')
+    return
+  }
+  if (form.value.provider === 'openai_compatible' && !form.value.base_url) {
+    ElMessage.warning('OpenAI 兼容供应商需要先填写 Base URL')
+    return
+  }
+  fetchingModels.value = true
+  try {
+    const res = await axios.post('/api/v1/configs/fetch-models', {
+      provider: form.value.provider,
+      api_key: form.value.api_key,
+      base_url: form.value.base_url || null
+    })
+    availableModels.value = res.data.models || []
+    if (availableModels.value.length === 0) {
+      ElMessage.warning('上游未返回任何模型')
+    } else {
+      ElMessage.success(`拉取到 ${availableModels.value.length} 个模型`)
+    }
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '拉取模型失败')
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+const testConnection = async () => {
+  if (!form.value.api_key || !form.value.model_name) {
+    ElMessage.warning('请先填写 API Key 和模型名称')
+    return
+  }
+  testing.value = true
+  testResult.value = null
+  try {
+    const res = await axios.post('/api/v1/configs/test', {
+      provider: form.value.provider,
+      api_key: form.value.api_key,
+      base_url: form.value.base_url || null,
+      model_name: form.value.model_name,
+      model_type: form.value.model_type
+    })
+    testResult.value = { ok: true, message: res.data.message, latency_ms: res.data.latency_ms }
+  } catch (error) {
+    testResult.value = { ok: false, message: error.response?.data?.detail || '测试失败' }
+  } finally {
+    testing.value = false
+  }
 }
 
 const saveConfig = async () => {
@@ -142,5 +223,27 @@ onMounted(fetchConfigs)
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+}
+.model-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+}
+.model-select {
+    flex: 1;
+}
+.test-result {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+.test-result.ok {
+    background: #f0f9eb;
+    color: #67c23a;
+}
+.test-result.fail {
+    background: #fef0f0;
+    color: #f56c6c;
 }
 </style>
