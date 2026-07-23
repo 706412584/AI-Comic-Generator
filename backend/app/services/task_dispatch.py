@@ -25,6 +25,7 @@ RECOVERABLE_TASK_TYPES = {
     "storyboard",
     "image_generation",
     "character_generation",
+    "assistant_chat",
 }
 
 
@@ -66,6 +67,10 @@ def run_task(task_id: str, task_type: str, payload: dict | None = None):
             g.generate_character_task(task_id, int(payload["character_id"]))
         else:
             g.generate_all_characters_task(task_id, payload["project_id"])
+    elif task_type == "assistant_chat":
+        from app.services.assistant_chat_runner import run_assistant_chat_task
+
+        run_assistant_chat_task(task_id)
     else:
         raise ValueError(f"Unknown task type: {task_type}")
 

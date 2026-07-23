@@ -1,8 +1,9 @@
 <template>
   <div class="project-view" v-loading="loading" element-loading-text="处理中..." element-loading-background="rgba(0, 0, 0, 0.8)">
-    <ProjectHeader 
-      :title="project.title" 
-      @export="openExportDialog" 
+    <ProjectHeader
+      :title="project.title"
+      @export="openExportDialog"
+      @open-assistant="showAssistant = true"
     />
 
     <TaskManager 
@@ -112,6 +113,13 @@
       v-model:visible="showTerminalDialog"
       :task-id="currentTerminalTaskId"
     />
+
+    <AssistantPanel
+      v-model="showAssistant"
+      :project-id="projectId"
+      @task-started="pollActiveTasks"
+      @open-terminal="openTerminal"
+    />
   </div>
 </template>
 
@@ -135,6 +143,7 @@ import HistoryDialog from './project/HistoryDialog.vue'
 import MergeDialog from './project/MergeDialog.vue'
 import ExportDialog from './project/ExportDialog.vue'
 import TerminalDialog from './project/TerminalDialog.vue'
+import AssistantPanel from './project/AssistantPanel.vue'
 
 const route = useRoute()
 const projectId = computed(() => route.params.id)
@@ -206,6 +215,7 @@ const showExportDialog = ref(false)
 const showHistoryDialog = ref(false)
 const showTerminalDialog = ref(false)
 const currentTerminalTaskId = ref('')
+const showAssistant = ref(false)
 
 // History State
 const currentHistoryType = ref('')

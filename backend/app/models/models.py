@@ -225,6 +225,17 @@ class AgentRunBase(SQLModel):
     result_payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     error_payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
+class AgentConversationBase(SQLModel):
+    title: str = "创作助手"
+    status: str = "active"
+
+class AgentMessageBase(SQLModel):
+    role: str  # user | assistant | system
+    content: str
+    intent: Optional[str] = None
+    task_id: Optional[str] = Field(default=None, foreign_key="task.id")
+    payload: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
 # --- Table Models ---
 
 class ModelConfig(ModelConfigBase, table=True):
@@ -253,6 +264,7 @@ class Project(ProjectBase, table=True):
     source_imports: List["SourceImport"] = Relationship(back_populates="project", sa_relationship_kwargs={"cascade": "all, delete"})
     source_chapters: List["SourceChapter"] = Relationship(back_populates="project", sa_relationship_kwargs={"cascade": "all, delete"})
     agent_runs: List["AgentRun"] = Relationship(back_populates="project", sa_relationship_kwargs={"cascade": "all, delete"})
+    agent_conversations: List["AgentConversation"] = Relationship(back_populates="project", sa_relationship_kwargs={"cascade": "all, delete"})
 
 class Character(CharacterBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -444,3 +456,20 @@ class ChapterTask(ChapterTaskBase, table=True):
 
     project: Project = Relationship(back_populates="chapter_tasks")
     chapter: Optional[Chapter] = Relationship(back_populates="tasks")
+
+class AgentConversation(AgentConversationBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: str = Field(foreign_key="project.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    project: Project = Relationship(back_populates="agent_conversations")
+    messages: List["AgentMessage"] = Relationship(back_populates="conversation", sa_relationship_kwargs={"cascade": "all, delete"})
+
+class AgentMessage(AgentMessageBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(foreign_key="agentconversation.id")
+    project_id: str = Field(foreign_key="project.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    conversation: AgentConversation = Relationship(back_populates="messages")

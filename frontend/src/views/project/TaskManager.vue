@@ -79,7 +79,8 @@ const retryableTaskTypes = new Set([
     'source_project_initialization',
     'storyboard',
     'image_generation',
-    'character_generation'
+    'character_generation',
+    'assistant_chat',
 ])
 
 const runningCount = computed(() => {
@@ -137,7 +138,8 @@ const getTaskTypeName = (type) => {
     'storyboard': '分镜生成',
     'chapter_storyboard': '章节分镜生成',
     'image_generation': '全量图片生成',
-    'character_generation': '角色绘制'
+    'character_generation': '角色绘制',
+    'assistant_chat': '创作助手回复',
   }
   return map[type] || type || '未知任务'
 }
@@ -165,7 +167,13 @@ const getTaskCardSummary = (task) => {
     chapter_content_generation: '生成当前章节正文',
     chapter_storyboard: '把章节正文改写为漫画分镜',
     image_generation: '生成图片资源',
-    storyboard: '生成项目分镜和角色设定'
+    storyboard: '生成项目分镜和角色设定',
+    assistant_chat: '根据项目上下文生成助手回复',
+  }
+  if (task.type === 'assistant_chat' && task.result?.stream_chars) {
+    if (task.status === 'processing' || task.status === 'pending') {
+      return `${statusText}：已生成 ${task.result.stream_chars} 字`
+    }
   }
   if (task.status === 'completed') return `${statusText}：${getTaskResultSummary(task) || '已生成并保存结果'}`
   if (task.status === 'failed') return `${statusText}：${task.message || '任务执行失败'}`

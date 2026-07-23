@@ -136,10 +136,12 @@ class OpenAICompatibleAIServiceTest(unittest.TestCase):
                 raise __import__("requests").RequestException("stream broken")
             return DummyResponse({"choices": [{"message": {"content": "非流式结果"}}]})
 
+        deltas = []
         with patch("app.services.ai_service.requests.post", fake_post):
-            result = service.generate_text_stream("system", "input", on_delta=lambda text: None)
+            result = service.generate_text_stream("system", "input", on_delta=deltas.append)
 
         self.assertEqual(result, "非流式结果")
+        self.assertEqual(deltas, ["非流式结果"])
 
     def test_generate_text_stream_callback_exception_propagates(self):
         config = self.make_config("text")

@@ -37,6 +37,67 @@ class AIService:
 
         raise NotImplementedError(f"Provider {config.provider} not supported yet.")
 
+    def chat_completion(
+        self,
+        messages: list[dict],
+        *,
+        tools: Optional[List[dict]] = None,
+        tool_choice: str | dict | None = "auto",
+        temperature: float = 0.7,
+    ) -> dict:
+        """OpenAI-compatible chat completions with optional tools.
+
+        Returns a normalized message dict:
+        {"role": "assistant", "content": str|None, "tool_calls": list|None}
+        """
+        config = self._get_config("text")
+        provider = self._provider_name(config)
+        if provider != "openai_compatible":
+            # Fallback: collapse messages into single-shot text without tools.
+            system_parts = [m.get("content") or "" for m in messages if m.get("role") == "system"]
+            user_parts = []
+            for m in messages:
+                if m.get("role") == "system":
+                    continue
+                role = m.get("role") or "user"
+                content = m.get("content") or ""
+                if content:
+                    user_parts.append(f"[{role}] {content}")
+            text = self.generate_text(
+                "\n\n".join(system_parts) or "You are a helpful assistant.",
+                "\n".join(user_parts),
+            )
+            return {"role": "assistant", "content": text, "tool_calls": None}
+
+        payload: dict = {
+            "model": config.model_name,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if tools:
+            payload["tools"] = tools
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+
+        data = self._post_openai_compatible(config, "/chat/completions", payload, timeout=300)
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError("OpenAI-compatible chat response missing choices[0].message") from exc
+
+        content = message.get("content")
+        tool_calls = message.get("tool_calls") or None
+        if isinstance(content, list):
+            # Some gateways return content parts
+            content = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part) for part in content
+            )
+        return {
+            "role": "assistant",
+            "content": content,
+            "tool_calls": tool_calls if tool_calls else None,
+        }
+
     def generate_text_stream(
         self,
         system_prompt: str,
@@ -63,7 +124,10 @@ class AIService:
             raise exc.original
         except Exception as exc:
             logger.warning(f"Streaming request failed, falling back to non-streaming: {exc}")
-            return self._generate_text_openai_compatible(config, system_prompt, user_input)
+            content = self._generate_text_openai_compatible(config, system_prompt, user_input)
+            if on_delta and content:
+                on_delta(content)
+            return content
 
     def _generate_text_stream_openai_compatible(
         self,

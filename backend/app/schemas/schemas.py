@@ -350,3 +350,35 @@ class ProjectRead(ProjectBase):
     outlines: List[OutlineRead] = []
     memories: List[MemoryEntryRead] = []
     chapter_tasks: List[ChapterTaskRead] = []
+
+
+# Assistant workbench chat
+class AgentMessageCreate(BaseModel):
+    content: str
+
+
+class AgentMessageRead(BaseModel):
+    id: int
+    conversation_id: int
+    project_id: str
+    role: str
+    content: str
+    intent: Optional[str] = None
+    task_id: Optional[str] = None
+    payload: Dict[str, Any] = {}
+    created_at: datetime
+
+
+class AgentConversationRead(BaseModel):
+    id: int
+    project_id: str
+    title: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AssistantChatResponse(BaseModel):
+    conversation_id: int
+    user_message: AgentMessageRead
+    task_id: str

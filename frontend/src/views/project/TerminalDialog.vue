@@ -226,7 +226,8 @@ const retryableTaskTypes = new Set([
   'source_project_initialization',
   'storyboard',
   'image_generation',
-  'character_generation'
+  'character_generation',
+  'assistant_chat',
 ])
 let pollingInterval = null
 let taskEventSource = null
@@ -296,7 +297,8 @@ const buildTaskSummary = (currentTask, runs = []) => {
     chapter_content_generation: '正在根据章节目标、原文上下文和项目设定生成章节正文。',
     chapter_storyboard: '正在把当前章节内容改写为漫画分镜，生成画面、动作、对白和角色信息。',
     image_generation: '正在根据角色或分镜提示词生成图片资源。',
-    storyboard: '正在根据故事输入生成项目分镜和相关角色设定。'
+    storyboard: '正在根据故事输入生成项目分镜和相关角色设定。',
+    assistant_chat: '正在根据项目摘要与对话历史生成创作助手回复。',
   }
   const base = typeSummaryMap[currentTask.type] || `正在处理「${typeName}」任务。`
   const main = currentTask.status === 'completed'
@@ -325,7 +327,8 @@ const getTaskTypeName = (type) => {
     storyboard: '分镜生成',
     chapter_storyboard: '章节分镜生成',
     image_generation: '全量图片生成',
-    character_generation: '角色绘制'
+    character_generation: '角色绘制',
+    assistant_chat: '创作助手回复',
   }
   return map[type] || type || '未知任务'
 }

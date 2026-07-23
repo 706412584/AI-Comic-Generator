@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.paths import static_dir as resolve_static_dir
-from app.routers import configs, projects, generation, export, tasks, history, management, source
+from app.routers import configs, projects, generation, export, tasks, history, management, source, assistant
 
 APP_VERSION = "0.2.0"
 
@@ -48,6 +48,7 @@ app.include_router(generation.router, prefix=f"{settings.API_V1_STR}/generate", 
 app.include_router(export.router, prefix=f"{settings.API_V1_STR}/export", tags=["export"])
 app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}/tasks", tags=["tasks"])
 app.include_router(history.router, prefix=f"{settings.API_V1_STR}/history", tags=["history"])
+app.include_router(assistant.router, prefix=f"{settings.API_V1_STR}/projects", tags=["assistant"])
 
 @app.on_event("startup")
 def on_startup():
