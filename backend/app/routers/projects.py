@@ -1,4 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+import os
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlmodel import Session
 from typing import List, Dict
 from pydantic import BaseModel
@@ -7,6 +13,12 @@ from app.models.models import Project, GlobalConfig, Character, StoryboardItem
 from app.schemas.schemas import ProjectCreate, ProjectUpdate, ProjectRead
 from app.cruds import crud_project
 from app.services.consistency_service import ConsistencyService
+from app.services.project_archive_service import (
+    MAX_ARCHIVE_BYTES,
+    ProjectArchiveError,
+    create_project_archive,
+    import_project_archive,
+)
 
 router = APIRouter()
 
@@ -14,9 +26,77 @@ router = APIRouter()
 def create_project(project_in: ProjectCreate, session: Session = Depends(get_session)):
     return crud_project.create_project(session, project_in)
 
-@router.get("/", response_model=List[Project])
-def read_projects(skip: int = 0, limit: int = 100, session: Session = Depends(get_session)):
-    return crud_project.get_projects(session, skip, limit)
+@router.get("/")
+def read_projects(skip: int = 0, limit: int = 500, session: Session = Depends(get_session)):
+    """项目列表，附带首页卡片所需的轻量摘要（封面图、章节数）。"""
+    from sqlmodel import select
+
+    projects = crud_project.get_projects(session, skip, limit)
+    result = []
+    for p in projects:
+        cover = None
+        for item in p.storyboard_items:
+            if item.image_url:
+                cover = item.image_url
+                break
+        if not cover:
+            for char in p.characters:
+                if char.image_url:
+                    cover = char.image_url
+                    break
+        data = p.model_dump()
+        data["cover_image"] = cover
+        data["chapter_count"] = len(p.chapters)
+        result.append(data)
+    return result
+
+
+@router.post("/import", response_model=ProjectRead)
+async def import_project(request: Request, session: Session = Depends(get_session)):
+    content_length = request.headers.get("content-length")
+    try:
+        exceeds_limit = content_length is not None and int(content_length) > MAX_ARCHIVE_BYTES
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的 Content-Length")
+    if exceeds_limit:
+        raise HTTPException(status_code=413, detail="项目 ZIP 不能超过 1 GB")
+
+    fd, temp_name = tempfile.mkstemp(prefix="ai-comic-import-", suffix=".zip")
+    os.close(fd)
+    temp_path = Path(temp_name)
+    written = 0
+    try:
+        with temp_path.open("wb") as output:
+            async for chunk in request.stream():
+                written += len(chunk)
+                if written > MAX_ARCHIVE_BYTES:
+                    raise HTTPException(status_code=413, detail="项目 ZIP 不能超过 1 GB")
+                output.write(chunk)
+        if written == 0:
+            raise HTTPException(status_code=400, detail="请选择项目 ZIP 文件")
+        try:
+            return import_project_archive(session, temp_path)
+        except ProjectArchiveError as exc:
+            session.rollback()
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+@router.get("/{project_id}/archive")
+def export_project_archive(project_id: str, session: Session = Depends(get_session)):
+    try:
+        archive_path, filename = create_project_archive(session, project_id)
+    except ProjectArchiveError as exc:
+        status = 404 if str(exc) == "Project not found" else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(archive_path.unlink, missing_ok=True),
+    )
+
 
 @router.get("/{project_id}", response_model=ProjectRead)
 def read_project(project_id: str, session: Session = Depends(get_session)):
@@ -39,6 +119,31 @@ def delete_project(project_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Project not found")
     crud_project.delete_project(session, project)
     return {"ok": True}
+
+
+class BatchDeleteRequest(BaseModel):
+    project_ids: List[str]
+
+
+@router.post("/batch-delete")
+def batch_delete_projects(
+    request: BatchDeleteRequest,
+    session: Session = Depends(get_session),
+):
+    """批量删除项目。返回实际删除数量与未找到的 ID 列表。"""
+    if not request.project_ids:
+        raise HTTPException(status_code=400, detail="project_ids is empty")
+
+    deleted = 0
+    missing: List[str] = []
+    for pid in request.project_ids:
+        project = crud_project.get_project(session, pid)
+        if project:
+            crud_project.delete_project(session, project)
+            deleted += 1
+        else:
+            missing.append(pid)
+    return {"ok": True, "deleted": deleted, "missing": missing}
 
 # --- Data Management Endpoints ---
 
