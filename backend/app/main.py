@@ -1,9 +1,11 @@
+import hmac
+import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -14,15 +16,27 @@ from app.routers import configs, projects, generation, export, tasks, history, m
 APP_VERSION = "0.2.0"
 
 app = FastAPI(title=settings.PROJECT_NAME)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@app.middleware("http")
+async def require_desktop_token(request: Request, call_next):
+    # Packaged desktop always sets COMIC_APP_AUTH_TOKEN. Local `python run_server.py`
+    # / pytest leave it unset and stay open for development. Set COMIC_APP_AUTH_REQUIRED=1
+    # to force fail-closed auth even without a token (returns 503 until token is configured).
+    expected_token = os.environ.get("COMIC_APP_AUTH_TOKEN")
+    auth_required = os.environ.get("COMIC_APP_AUTH_REQUIRED", "").lower() in {"1", "true", "yes"}
+    protected_path = request.url.path.startswith((settings.API_V1_STR, "/static/"))
+    if protected_path and (expected_token or auth_required):
+        if not expected_token:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Local auth token is required but not configured"},
+            )
+        supplied_token = request.headers.get("X-Comic-App-Token", "")
+        if not hmac.compare_digest(supplied_token, expected_token):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized local request"})
+    return await call_next(request)
 
 def frontend_dist_path() -> Path:
     if hasattr(sys, "_MEIPASS"):

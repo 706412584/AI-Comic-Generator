@@ -1,15 +1,18 @@
 // AI Comic Generator 桌面壳：负责启动/守护 FastAPI sidecar，健康检查通过后再打开主窗口。
 // 参考 cc-haha 的 serverRuntime/sidecarManager 模式（简化版）。
-const { app, BrowserWindow, dialog, shell } = require('electron')
+const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron')
 const { spawn, execFile } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
 
 const IS_DEV = process.argv.includes('--dev')
-const PREFERRED_PORTS = [8000, 8001, 8002, 8010, 8020]
+const PREFERRED_PORTS = [48730, 48731, 48732, 48733, 48734]
+const EXPECTED_BACKEND_APP = 'AI Comic Generator'
 const HEALTH_TIMEOUT_MS = 60_000
 const HEALTH_POLL_INTERVAL_MS = 500
+const BACKEND_AUTH_TOKEN = crypto.randomBytes(32).toString('hex')
 
 let mainWindow = null
 let loadingWindow = null
@@ -76,6 +79,7 @@ function resolveBackendCommand(port) {
     ...process.env,
     COMIC_APP_DATA_DIR: backendDataDir(),
     COMIC_APP_PORT: String(port),
+    COMIC_APP_AUTH_TOKEN: BACKEND_AUTH_TOKEN,
   }
 
   if (app.isPackaged) {
@@ -127,10 +131,16 @@ async function waitForHealth(port) {
     if (isQuitting) throw new Error('quitting')
     if (!backendProcess) throw new Error('后端进程已退出')
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(2000) })
-      if (res.ok) return
+      const res = await fetch(url, {
+        headers: { 'X-Comic-App-Token': BACKEND_AUTH_TOKEN },
+        signal: AbortSignal.timeout(2000),
+      })
+      if (res.ok) {
+        const health = await res.json()
+        if (health.status === 'ok' && health.app === EXPECTED_BACKEND_APP) return
+      }
     } catch {
-      // 未就绪，继续等待
+      // 未就绪或端口上的服务不是本应用，继续等待
     }
     await new Promise(resolve => setTimeout(resolve, HEALTH_POLL_INTERVAL_MS))
   }
@@ -163,6 +173,7 @@ function createLoadingWindow() {
     frame: false,
     resizable: false,
     show: true,
+    backgroundColor: '#111111',
     webPreferences: { contextIsolation: true },
   })
   loadingWindow.loadFile(path.join(__dirname, 'loading.html'))
@@ -178,8 +189,10 @@ function createMainWindow(port) {
     minWidth: 1024,
     minHeight: 700,
     show: false,
+    frame: false,
     autoHideMenuBar: true,
     title: 'AI Comic Generator',
+    backgroundColor: '#111111',
     icon: path.join(__dirname, 'icon.ico'),
     webPreferences: {
       contextIsolation: true,
@@ -188,13 +201,48 @@ function createMainWindow(port) {
     },
   })
 
-  // 外部链接用系统浏览器打开
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url) && !url.includes(`127.0.0.1:${port}`)) {
-      shell.openExternal(url)
-      return { action: 'deny' }
+  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: [`http://127.0.0.1:${port}/*`] },
+    (details, callback) => {
+      details.requestHeaders['X-Comic-App-Token'] = BACKEND_AUTH_TOKEN
+      callback({ requestHeaders: details.requestHeaders })
+    },
+  )
+
+  const isAppUrl = url => {
+    try {
+      const parsed = new URL(url)
+      return (
+        (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+        parsed.hostname === '127.0.0.1' &&
+        String(parsed.port || (parsed.protocol === 'https:' ? '443' : '80')) === String(port)
+      )
+    } catch {
+      return false
     }
-    return { action: 'allow' }
+  }
+  const isSafeExternalHttp = url => {
+    try {
+      const parsed = new URL(url)
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+    } catch {
+      return false
+    }
+  }
+
+  // 仅允许本应用 origin；外部 http(s) 走系统浏览器；拒绝 javascript:/data: 等
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAppUrl(url)) return { action: 'allow' }
+    if (isSafeExternalHttp(url) && !isAppUrl(url)) {
+      shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return
+    event.preventDefault()
+    if (isSafeExternalHttp(url)) shell.openExternal(url)
   })
 
   mainWindow.once('ready-to-show', () => {
@@ -205,12 +253,36 @@ function createMainWindow(port) {
     mainWindow.show()
   })
 
+  const emitMaximizeState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('window:maximize-change', mainWindow.isMaximized())
+  }
+  mainWindow.on('maximize', emitMaximizeState)
+  mainWindow.on('unmaximize', emitMaximizeState)
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/`)
 }
+
+// ---------- 窗口控制 IPC ----------
+
+ipcMain.on('window:minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
+})
+ipcMain.on('window:toggle-maximize', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMaximized()) mainWindow.unmaximize()
+  else mainWindow.maximize()
+})
+ipcMain.on('window:close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+})
+ipcMain.handle('window:is-maximized', () => {
+  return !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized())
+})
 
 // ---------- 生命周期 ----------
 
