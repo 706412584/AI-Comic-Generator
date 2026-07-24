@@ -401,6 +401,9 @@ const scrollTerminalToBottom = () => {
 }
 
 const stepNameMap = {
+  validate_project: '检查项目初始化条件',
+  generate_skeleton: '生成项目骨架',
+  persist_skeleton: '写入项目骨架',
   load_source: '读取原文',
   analyze_source: '分析原文',
   split_chapters: '拆分章节',
@@ -580,6 +583,7 @@ const handleTaskStateEvent = (event) => {
   task.value = data.task
   logs.value = normalizeLogs(data.task.logs)
   isRunning.value = ['pending', 'processing'].includes(data.task.status)
+  fetchAgentRuns()
   scrollTerminalToBottom()
 }
 

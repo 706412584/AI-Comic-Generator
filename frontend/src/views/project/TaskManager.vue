@@ -214,54 +214,58 @@ const getTaskProgressStatus = (status) => {
     position: fixed;
     bottom: 20px;
     right: 20px;
-    width: 320px;
-    background: #1e1e1e;
-    border: 1px solid #333;
-    border-radius: 4px;
+    width: 340px;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
     padding: 0;
     z-index: 1000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55);
     transition: all 0.3s ease;
     overflow: hidden;
 }
 .task-manager.collapsed {
-    width: 200px;
+    width: 220px;
 }
 .task-header {
-    font-weight: bold;
-    padding: 10px 15px;
-    background: #2b2b2b;
-    border-bottom: 1px solid #333;
+    font-weight: 600;
+    padding: 10px 14px;
+    background: var(--app-surface-2);
+    border-bottom: 1px solid var(--app-border);
     cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
     user-select: none;
+    color: var(--app-text);
+    transition: background-color 0.15s;
 }
 .task-header:hover {
-    background: #333;
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--app-accent);
 }
 .task-list {
-    max-height: 300px;
+    max-height: 320px;
     overflow-y: auto;
-    padding: 10px;
+    padding: 10px 12px;
 }
 .task-item {
-    margin-bottom: 15px;
+    margin-bottom: 10px;
     font-size: 0.9em;
-    padding: 8px 6px 10px;
-    border-bottom: 1px solid #2a2a2a;
-    border-radius: 6px;
+    padding: 10px;
+    border: 1px solid var(--app-border);
+    background: var(--app-surface-2);
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
 }
 
 .task-item:hover {
-    background: #252525;
+    background: rgba(245, 158, 11, 0.06);
+    border-color: var(--app-border-strong);
 }
 .task-item:last-child {
     margin-bottom: 0;
-    padding-bottom: 0;
-    border-bottom: none;
 }
 .task-info {
     display: flex;
@@ -288,7 +292,7 @@ const getTaskProgressStatus = (status) => {
 .task-desc,
 .task-result {
     font-size: 0.8em;
-    color: #888;
+    color: var(--app-text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -307,8 +311,12 @@ const getTaskProgressStatus = (status) => {
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
-.task-status.pending { color: #909399; }
-.task-status.processing { color: #409EFF; }
+.task-status {
+    font-size: 0.85em;
+    font-weight: 500;
+}
+.task-status.pending { color: var(--app-text-secondary); }
+.task-status.processing { color: var(--app-accent); }
 .task-status.completed { color: #67C23A; }
 .task-status.failed { color: #F56C6C; }
 .task-status.cancelled { color: #E6A23C; }

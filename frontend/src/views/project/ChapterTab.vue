@@ -819,8 +819,9 @@ onMounted(async () => {
 }
 
 .panel-card {
-  border: 1px solid #333;
-  background-color: #1e1e1e;
+  border: 1px solid var(--app-border);
+  background-color: var(--app-surface);
+  border-radius: var(--app-radius);
 }
 
 .chapter-list-card {
@@ -855,14 +856,22 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px;
-  border: 1px solid #333;
-  border-radius: 6px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  background: #252525;
+  background: var(--app-surface-2);
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.list-item:hover,
+.version-item:hover {
+  border-color: var(--app-border-strong);
+  background: rgba(245, 158, 11, 0.05);
 }
 
 .list-item.active {
-  border-color: #409eff;
+  border-color: var(--app-accent);
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .item-main,
@@ -982,14 +991,14 @@ onMounted(async () => {
 .meta-card,
 .mini-info-item,
 .content-card {
-  border: 1px solid #333;
-  background: #252525;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
 }
 
 .meta-card,
 .mini-info-item {
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-sm);
 }
 
 .meta-label,
@@ -1003,7 +1012,7 @@ onMounted(async () => {
 .meta-value,
 .mini-value,
 .content-text {
-  color: #ddd;
+  color: var(--app-text);
   white-space: pre-wrap;
   line-height: 1.6;
 }
@@ -1011,10 +1020,10 @@ onMounted(async () => {
 .content-preview {
   min-height: 360px;
   padding: 16px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #252525;
-  color: #ddd;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-surface-2);
+  color: var(--app-text);
   white-space: pre-wrap;
   line-height: 1.8;
 }
@@ -1047,10 +1056,10 @@ onMounted(async () => {
   max-height: 520px;
   overflow-y: auto;
   padding: 16px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #252525;
-  color: #ddd;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-surface-2);
+  color: var(--app-text);
   white-space: pre-wrap;
   line-height: 1.8;
 }
@@ -1067,8 +1076,9 @@ onMounted(async () => {
 }
 
 .continuity-issue {
-  border: 1px solid #333;
-  background: #252525;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  border-radius: var(--app-radius-sm);
 }
 
 .issue-header {
@@ -1079,16 +1089,16 @@ onMounted(async () => {
 }
 
 .issue-category {
-  color: #909399;
+  color: var(--app-text-secondary);
 }
 
 .issue-message {
-  color: #eee;
+  color: var(--app-text);
   margin: 8px 0;
 }
 
 .issue-detail {
-  color: #bbb;
+  color: var(--app-text-secondary);
   margin: 6px 0 0;
   line-height: 1.6;
 }

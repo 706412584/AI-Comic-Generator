@@ -393,7 +393,7 @@ onMounted(() => {
 
 .panel-card {
   border: 1px solid #333;
-  background-color: #1e1e1e;
+  background-color: var(--app-surface-2);
 }
 
 .card-header,

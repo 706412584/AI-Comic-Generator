@@ -232,8 +232,9 @@ onMounted(loadData)
   padding-bottom: 40px;
 }
 .panel-card {
-  border: 1px solid #333;
-  background-color: #1e1e1e;
+  border: 1px solid var(--app-border);
+  background-color: var(--app-surface);
+  border-radius: var(--app-radius);
 }
 .card-header {
   display: flex;
@@ -249,21 +250,26 @@ onMounted(loadData)
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid #333;
-  border-radius: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  background: #252525;
+  background: var(--app-surface-2);
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.list-item:hover {
+  border-color: var(--app-border-strong);
 }
 .list-item.active {
-  border-color: #409EFF;
+  border-color: var(--app-accent);
+  background: rgba(245, 158, 11, 0.08);
 }
 .item-title {
-  color: #E5EAF3;
+  color: var(--app-text);
   font-weight: 600;
 }
 .item-desc {
-  color: #888;
+  color: var(--app-text-secondary);
   font-size: 0.85em;
   margin-top: 4px;
 }
@@ -277,11 +283,12 @@ onMounted(loadData)
   gap: 14px;
 }
 .setting-card {
-  border: 1px solid #333;
-  background: #252525;
+  border: 1px solid var(--app-border);
+  background: var(--app-surface-2);
+  border-radius: var(--app-radius-sm);
 }
 .setting-content {
-  color: #ddd;
+  color: var(--app-text);
   white-space: pre-wrap;
   line-height: 1.6;
 }

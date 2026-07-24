@@ -1,10 +1,58 @@
+/* ============================================
+   全局主题：墨黑 + 琥珀橙（漫画工作台）
+   ============================================ */
+
+:root {
+  --app-bg: #0f1115;
+  --app-surface: #16181d;
+  --app-surface-2: #1c1f26;
+  --app-border: #262a33;
+  --app-border-strong: #333945;
+  --app-text: #e8e6e3;
+  --app-text-secondary: #9ca3af;
+  --app-accent: #f59e0b;
+  --app-accent-strong: #d97706;
+  --app-radius: 10px;
+  --app-radius-sm: 6px;
+}
+
+/* Element Plus 暗色变量覆盖 */
+html.dark {
+  --el-color-primary: #ea9412;
+  --el-color-primary-dark-2: #fbbf24;
+  --el-color-primary-light-3: #c27c0e;
+  --el-color-primary-light-5: #93600d;
+  --el-color-primary-light-7: #64430c;
+  --el-color-primary-light-8: #4c340b;
+  --el-color-primary-light-9: #33250a;
+
+  --el-bg-color: var(--app-surface);
+  --el-bg-color-page: var(--app-bg);
+  --el-bg-color-overlay: var(--app-surface-2);
+
+  --el-border-color: var(--app-border);
+  --el-border-color-light: var(--app-border);
+  --el-border-color-lighter: var(--app-border);
+  --el-border-color-hover: var(--app-border-strong);
+
+  --el-fill-color-blank: var(--app-surface);
+  --el-fill-color-light: var(--app-surface-2);
+
+  --el-text-color-primary: var(--app-text);
+  --el-text-color-regular: #c9cdd4;
+  --el-text-color-secondary: var(--app-text-secondary);
+
+  --el-border-radius-base: var(--app-radius-sm);
+  --el-box-shadow-light: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 html, body {
   margin: 0;
   padding: 0;
   height: 100%;
   width: 100%;
-  background-color: #121212;
-  color: #e0e0e0;
+  background-color: var(--app-bg);
+  color: var(--app-text);
   font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
 }
 
@@ -16,18 +64,31 @@ html, body {
   height: 100%;
 }
 
-/* Scrollbar styling for tech look */
+/* 卡片与弹窗圆角层次 */
+.el-card {
+  border-radius: var(--app-radius);
+  border-color: var(--app-border);
+  transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+.el-dialog {
+  border-radius: var(--app-radius);
+}
+.el-tabs__item {
+  transition: color 0.15s;
+}
+
+/* 滚动条 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #1e1e1e; 
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #333; 
+  background: #2e333d;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #555; 
+  background: #414855;
 }

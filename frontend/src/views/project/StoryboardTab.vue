@@ -258,8 +258,9 @@ const generatePanel = async (itemId) => {
   padding-bottom: 40px;
 }
 .filter-card {
-    border: 1px solid #333;
-    background-color: #1e1e1e;
+    border: 1px solid var(--app-border);
+    background-color: var(--app-surface);
+    border-radius: var(--app-radius);
 }
 .chapter-filter {
     width: 260px;
@@ -279,8 +280,13 @@ const generatePanel = async (itemId) => {
     margin-bottom: 24px;
 }
 .panel-card {
-    border: 1px solid #333;
-    background-color: #1e1e1e;
+    border: 1px solid var(--app-border);
+    background-color: var(--app-surface);
+    border-radius: var(--app-radius);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.panel-card:hover {
+    border-color: var(--app-border-strong);
 }
 .card-header {
     display: flex;
@@ -288,9 +294,10 @@ const generatePanel = async (itemId) => {
     align-items: center;
 }
 .panel-title {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 600;
-    color: #409EFF;
+    color: var(--app-accent);
+    letter-spacing: 0.3px;
 }
 .header-actions {
     display: flex;
@@ -304,22 +311,26 @@ const generatePanel = async (itemId) => {
 }
 .detail-group label {
     display: block;
-    color: #909399;
-    font-size: 0.9rem;
+    color: var(--app-text-secondary);
+    font-size: 0.85rem;
     margin-bottom: 4px;
     font-weight: 500;
+    letter-spacing: 0.2px;
 }
 .detail-content {
-    color: #E5EAF3;
-    line-height: 1.5;
+    color: var(--app-text);
+    line-height: 1.55;
 }
 .prompt-text {
-    background: #252525;
-    padding: 10px;
-    border-radius: 4px;
-    font-size: 0.95rem;
+    background: var(--app-surface-2);
+    border: 1px solid var(--app-border);
+    padding: 10px 12px;
+    border-radius: var(--app-radius-sm);
+    font-size: 0.9rem;
     max-height: 200px;
     overflow-y: auto;
+    color: #d1d5db;
+    line-height: 1.55;
 }
 .tags-wrapper {
     display: flex;
@@ -333,12 +344,12 @@ const generatePanel = async (itemId) => {
 }
 .image-wrapper {
     width: 100%;
-    /* Flexible height */
     min-height: 300px;
     display: flex;
     justify-content: center;
-    background: #1a1a1a;
-    border-radius: 4px;
+    background: var(--app-bg);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-sm);
     padding: 10px;
 }
 .comic-preview {
@@ -352,18 +363,19 @@ const generatePanel = async (itemId) => {
     display: flex;
     justify-content: center;
     align-items: center;
-    background: #2a2a2a;
-    color: #666;
-    border-radius: 4px;
+    background: var(--app-surface-2);
+    color: var(--app-text-secondary);
+    border-radius: var(--app-radius-sm);
+    font-size: 0.9rem;
 }
 .image-actions {
     display: flex;
     justify-content: center;
     width: 100%;
 }
-.tip-text { color: #888; font-size: 0.9em; }
-.warning-text { color: #E6A23C; font-size: 0.9em; display: inline-flex; align-items: center; gap: 4px; }
-.text-gray { color: #888; }
+.tip-text { color: var(--app-text-secondary); font-size: 0.85em; }
+.warning-text { color: #E6A23C; font-size: 0.85em; display: inline-flex; align-items: center; gap: 4px; }
+.text-gray { color: var(--app-text-secondary); }
 .sm-text { font-size: 0.85em; }
 .mt-2 { margin-top: 10px; }
 .mt-3 { margin-top: 16px; }

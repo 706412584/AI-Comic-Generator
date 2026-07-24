@@ -26,9 +26,9 @@
         <el-menu 
           :default-active="activeCharId" 
           @select="handleCharSelect"
-          background-color="#1e1e1e"
+          background-color="#1c1f26"
           text-color="#fff"
-          active-text-color="#409EFF"
+          active-text-color="#f59e0b"
           class="char-menu"
         >
           <el-menu-item v-for="char in project.characters" :key="char.id" :index="String(char.id)">
@@ -424,14 +424,14 @@ const deleteCharacter = async (charId) => {
 .char-studio-container {
     height: calc(100vh - 200px); /* Dynamic height based on viewport */
     min-height: 600px;
-    border: 1px solid #333;
-    background: #1e1e1e;
-    border-radius: 8px;
+    border: 1px solid var(--app-border);
+    background: var(--app-surface);
+    border-radius: var(--app-radius);
     overflow: hidden;
 }
 .char-list-aside {
-    background-color: #1a1a1a;
-    border-right: 1px solid #333;
+    background-color: var(--app-surface-2);
+    border-right: 1px solid var(--app-border);
 }
 .char-menu {
     border-right: none;
@@ -447,18 +447,19 @@ const deleteCharacter = async (charId) => {
     align-items: center;
     margin-bottom: 24px;
     padding-bottom: 16px;
-    border-bottom: 1px solid #333;
+    border-bottom: 1px solid var(--app-border);
 }
 .header-actions {
     display: flex;
     gap: 12px;
 }
 .info-card, .preview-card {
-    background: #252525;
-    border-radius: 8px;
+    background: var(--app-surface-2);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius);
     padding: 20px;
     height: 100%;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
 }
 .info-header {
     display: flex;
@@ -468,8 +469,9 @@ const deleteCharacter = async (charId) => {
 }
 .info-header h4, .preview-card h4 {
     margin: 0;
-    color: #eee;
-    font-size: 1.1rem;
+    color: var(--app-text);
+    font-size: 1.05rem;
+    letter-spacing: 0.3px;
 }
 .attributes-list {
     display: flex;
@@ -479,22 +481,22 @@ const deleteCharacter = async (charId) => {
 .attr-item {
     display: flex;
     justify-content: space-between;
-    border-bottom: 1px solid #333;
+    border-bottom: 1px solid var(--app-border);
     padding-bottom: 8px;
 }
 .attr-label {
-    color: #909399;
+    color: var(--app-text-secondary);
     font-weight: 500;
 }
 .attr-value {
-    color: #E5EAF3;
+    color: var(--app-text);
     text-align: right;
     max-width: 60%;
     white-space: pre-wrap;
     word-break: break-word;
 }
 .desc-text {
-    color: #ccc;
+    color: #cfd3dc;
     line-height: 1.6;
     margin-top: 8px;
     font-size: 0.95rem;
@@ -502,17 +504,17 @@ const deleteCharacter = async (charId) => {
 .image-wrapper {
     margin-top: 16px;
     width: 100%;
-    /* Flexible height container */
     min-height: 400px;
     display: flex;
     justify-content: center;
-    background: #1a1a1a;
-    border-radius: 4px;
+    background: var(--app-bg);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-sm);
     padding: 10px;
 }
 .image-preview {
     width: 100%;
-    height: auto; /* Allow height to grow */
+    height: auto;
     display: block;
 }
 .no-image {
@@ -522,14 +524,15 @@ const deleteCharacter = async (charId) => {
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    background: #2a2a2a;
-    color: #666;
-    border-radius: 4px;
+    background: var(--app-surface);
+    color: var(--app-text-secondary);
+    border-radius: var(--app-radius-sm);
     gap: 10px;
 }
 .sub-text {
     font-size: 0.8rem;
-    color: #555;
+    color: var(--app-text-secondary);
+    opacity: 0.7;
 }
 .text-truncate {
     white-space: nowrap;
@@ -543,17 +546,18 @@ const deleteCharacter = async (charId) => {
 /* Complex Attributes Styling */
 .complex-attr {
     margin-bottom: 16px;
-    background: #2a2a2a;
-    border-radius: 6px;
-    padding: 10px;
+    background: var(--app-surface-2);
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-sm);
+    padding: 10px 12px;
 }
 .complex-label {
-    color: #409EFF;
+    color: var(--app-accent);
     font-weight: 600;
     margin-bottom: 8px;
     font-size: 0.95rem;
-    border-bottom: 1px solid #333;
-    padding-bottom: 4px;
+    border-bottom: 1px solid var(--app-border);
+    padding-bottom: 6px;
 }
 .array-list {
     display: flex;
@@ -561,9 +565,10 @@ const deleteCharacter = async (charId) => {
     gap: 8px;
 }
 .array-item {
-    background: #333;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
     padding: 8px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-sm);
     font-size: 0.9em;
 }
 .object-grid {
@@ -575,12 +580,12 @@ const deleteCharacter = async (charId) => {
     margin-bottom: 4px;
 }
 .nested-label {
-    color: #bbb;
+    color: var(--app-text-secondary);
     font-weight: 500;
     margin-right: 4px;
 }
 .nested-value {
-    color: #eee;
+    color: var(--app-text);
 }
 .outfit-card {
     height: auto;
@@ -594,22 +599,28 @@ const deleteCharacter = async (charId) => {
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px;
-    border: 1px solid #333;
-    border-radius: 6px;
-    background: #2a2a2a;
+    padding: 12px;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-sm);
+    background: var(--app-surface-2);
+    transition: border-color 0.15s;
+}
+.outfit-item:hover {
+    border-color: var(--app-border-strong);
 }
 .outfit-title {
-    color: #E5EAF3;
+    color: var(--app-text);
     font-weight: 600;
 }
 .outfit-desc {
-    color: #ccc;
+    color: #cfd3dc;
     margin-top: 4px;
     white-space: pre-wrap;
+    font-size: 0.9em;
+    line-height: 1.5;
 }
 .outfit-meta {
-    color: #888;
+    color: var(--app-text-secondary);
     font-size: 0.85em;
     margin-top: 4px;
 }

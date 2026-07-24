@@ -14,7 +14,7 @@
     />
 
     <el-tabs v-model="activeTab" class="workflow-tabs">
-      <el-tab-pane label="1. 故事与配置" name="story">
+      <el-tab-pane label="故事与配置" name="story">
         <StoryTab
           :key="`story-${projectId}`"
           :project="project"
@@ -26,11 +26,11 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="2. 设定中心" name="settings">
+      <el-tab-pane label="设定中心" name="settings">
         <SettingTab :key="tabKey('settings')" :project-id="projectId" />
       </el-tab-pane>
 
-      <el-tab-pane label="3. 章节创作" name="chapters">
+      <el-tab-pane label="章节创作" name="chapters">
         <ChapterTab
           :key="tabKey('chapters')"
           :project-id="projectId"
@@ -39,7 +39,7 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="4. 人物关系" name="relationships">
+      <el-tab-pane label="人物关系" name="relationships">
         <RelationshipPanel
           :key="tabKey('relationships')"
           :project-id="projectId"
@@ -47,7 +47,7 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="5. 当前进度" name="progress">
+      <el-tab-pane label="当前进度" name="progress">
         <ProgressPanel
           :key="tabKey('progress')"
           :project-id="projectId"
@@ -55,7 +55,7 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="6. 记忆库" name="memory">
+      <el-tab-pane label="记忆库" name="memory">
         <MemoryPanel
           :key="tabKey('memory')"
           :project-id="projectId"
@@ -63,7 +63,7 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="7. 角色工坊" name="characters">
+      <el-tab-pane label="角色工坊" name="characters">
         <CharacterTab
           :project="project"
           :project-id="projectId"
@@ -76,7 +76,7 @@
         />
       </el-tab-pane>
 
-      <el-tab-pane label="8. 分镜画布" name="comic">
+      <el-tab-pane label="分镜画布" name="comic">
         <StoryboardTab
           :project="project"
           :project-id="projectId"
@@ -119,6 +119,7 @@
       :project-id="projectId"
       @task-started="pollActiveTasks"
       @open-terminal="openTerminal"
+      @project-mutated="handleAssistantProjectMutated"
     />
   </div>
 </template>
@@ -362,6 +363,12 @@ const handleTaskRetried = (task) => {
     }
 }
 
+// 助手写库工具完成后：刷新项目本体 + 设定/章节等内容 tab（角色工坊依赖 project.characters）
+const handleAssistantProjectMutated = async () => {
+    await fetchProject()
+    refreshContentTabs()
+}
+
 // 同一组件实例在 /project/A -> /project/B 时会被复用，必须监听路由参数重置全部状态
 watch(projectId, (newId, oldId) => {
     if (!newId || newId === oldId) return
@@ -389,9 +396,43 @@ onUnmounted(() => {
 
 <style scoped>
 .project-view {
-    padding: 20px;
-    height: 100vh;
+    padding: 16px 24px;
+    height: 100%;
     display: flex;
     flex-direction: column;
+    max-width: 1500px;
+    margin: 0 auto;
+    box-sizing: border-box;
+}
+.workflow-tabs {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.workflow-tabs :deep(.el-tabs__content) {
+    flex: 1;
+    overflow-y: auto;
+}
+.workflow-tabs :deep(.el-tabs__item) {
+    font-size: 14px;
+    color: var(--app-text-secondary);
+    transition: color 0.15s;
+}
+.workflow-tabs :deep(.el-tabs__item:hover) {
+    color: var(--app-text);
+}
+.workflow-tabs :deep(.el-tabs__item.is-active) {
+    color: var(--app-accent);
+    font-weight: 600;
+}
+.workflow-tabs :deep(.el-tabs__active-bar) {
+    background-color: var(--app-accent);
+    height: 2px;
+    border-radius: 2px;
+}
+.workflow-tabs :deep(.el-tabs__nav-wrap::after) {
+    background-color: var(--app-border);
+    height: 1px;
 }
 </style>
