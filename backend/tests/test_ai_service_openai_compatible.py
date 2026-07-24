@@ -127,6 +127,47 @@ class OpenAICompatibleAIServiceTest(unittest.TestCase):
         self.assertEqual(result, "第一段")
         self.assertEqual(deltas, ["第一", "第一段"])
 
+    def test_chat_completion_stream_uses_messages_payload(self):
+        config = self.make_config("text")
+        service = self.make_service(config)
+        deltas = []
+        captured = {}
+
+        class DummyStreamResponse:
+            ok = True
+            status_code = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def iter_lines(self, decode_unicode=True):
+                return iter([
+                    'data: {"choices": [{"delta": {"content": "多"}}]}',
+                    'data: {"choices": [{"delta": {"content": "轮"}}]}',
+                    'data: [DONE]',
+                ])
+
+        def fake_post(url, headers, json, timeout, stream=False):
+            captured["messages"] = json["messages"]
+            self.assertTrue(stream)
+            return DummyStreamResponse()
+
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+        ]
+        with patch("app.services.ai_service.requests.post", fake_post):
+            result = service.chat_completion_stream(messages, on_delta=deltas.append)
+
+        self.assertEqual(result, "多轮")
+        self.assertEqual(captured["messages"], messages)
+        self.assertEqual(deltas, ["多", "多轮"])
+
     def test_generate_text_stream_falls_back_to_non_streaming_on_failure(self):
         config = self.make_config("text")
         service = self.make_service(config)
@@ -234,6 +275,59 @@ class OpenAICompatibleAIServiceTest(unittest.TestCase):
         with patch("app.services.ai_service.requests.post", fake_post):
             with self.assertRaisesRegex(ValueError, "bad api key"):
                 service.generate_image("draw cat")
+
+    def test_generate_image_with_context_uses_image_edit_slot(self):
+        import tempfile
+
+        edit_config = self.make_config("image_edit")
+        edit_config.model_name = "grok-imagine-edit"
+        service = AIService(session=None)
+        service._get_config = Mock(side_effect=lambda t: edit_config if t == "image_edit" else self.make_config(t))
+        image_bytes = b"edited png"
+        calls = []
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(b"ref-bytes")
+            ref_path = tmp.name
+
+        def fake_post(url, headers=None, json=None, data=None, files=None, timeout=None):
+            calls.append({"url": url, "data": data, "files": files, "json": json})
+            self.assertIn("/images/edits", url)
+            self.assertIsNotNone(files)
+            self.assertEqual(data["model"], "grok-imagine-edit")
+            self.assertNotIn("size", data)  # grok edit 不传 size
+            return DummyResponse({"data": [{"b64_json": base64.b64encode(image_bytes).decode()}]})
+
+        try:
+            with patch("app.services.ai_service.requests.post", fake_post):
+                result = service.generate_image("fix hair", context_images=[ref_path], aspect_ratio="16:9")
+        finally:
+            Path(ref_path).unlink(missing_ok=True)
+
+        self.assertEqual(result, image_bytes)
+        self.assertTrue(calls)
+        service._get_config.assert_any_call("image_edit")
+
+    def test_edit_image_requires_image_edit_config(self):
+        service = AIService(session=None)
+        service._get_config = Mock(side_effect=ValueError("No active configuration found for image_edit model."))
+        with self.assertRaisesRegex(ValueError, "image_edit"):
+            service.edit_image("fix", "/tmp/missing.png")
+
+    def test_generate_image_context_without_edit_config_raises_for_openai(self):
+        image_config = self.make_config("image")
+
+        def get_cfg(t):
+            if t == "image_edit":
+                raise ValueError("No active configuration found for image_edit model.")
+            if t == "image":
+                return image_config
+            raise ValueError(t)
+
+        service = AIService(session=None)
+        service._get_config = Mock(side_effect=get_cfg)
+        with self.assertRaisesRegex(ValueError, "图片编辑"):
+            service.generate_image("draw", context_images=["/does/not/need/to/exist.png"])
 
 
 if __name__ == "__main__":

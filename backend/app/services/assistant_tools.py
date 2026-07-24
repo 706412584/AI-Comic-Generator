@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.models.models import (
     Chapter,
     Character,
+    CharacterRelationship,
     MemoryEntry,
     Outline,
     Project,
@@ -17,6 +18,7 @@ from app.models.models import (
     SettingCategory,
     SettingEntry,
     SourceImport,
+    StoryboardItem,
     Task,
 )
 
@@ -121,14 +123,74 @@ def openai_tool_definitions() -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_chapter",
-                "description": "读取某一章节详情，可选包含正文",
+                "description": (
+                    "读取某一章节详情。mode: summary=仅元数据+摘要；"
+                    "full=含正文（默认，可截断）；segment=按 offset/limit 截取正文片段做精读"
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "chapter_id": {"type": "integer"},
-                        "include_content": {"type": "boolean", "description": "是否包含正文，默认 true"},
+                        "include_content": {
+                            "type": "boolean",
+                            "description": "兼容旧参数：false 等价 mode=summary；默认 true",
+                        },
+                        "mode": {
+                            "type": "string",
+                            "description": "summary | full | segment，默认 full",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "mode=segment 时正文起始字符位置，默认 0",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "mode=segment 时截取长度，默认 2000，最大 8000",
+                        },
                     },
                     "required": ["chapter_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_chapters",
+                "description": "按关键词搜索章节（标题/摘要/正文片段），返回命中位置摘要，不含全文",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_setting",
+                "description": "读取某一设定条目详情",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"setting_id": {"type": "integer"}},
+                    "required": ["setting_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_character",
+                "description": "读取某一角色详情（含 data/别名/状态）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"character_id": {"type": "integer"}},
+                    "required": ["character_id"],
                     "additionalProperties": False,
                 },
             },
@@ -189,6 +251,52 @@ def openai_tool_definitions() -> list[dict[str, Any]]:
                         "limit": {"type": "integer"},
                     },
                     "required": ["query"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_storyboard",
+                "description": "列出分镜条目（可按章节过滤），不含超长 prompt",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chapter_id": {"type": "integer", "description": "可选，限定某一章"},
+                        "limit": {"type": "integer"},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_storyboard_item",
+                "description": "读取单个分镜条目详情（含 data 摘要）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"item_id": {"type": "integer"}},
+                    "required": ["item_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_relationships",
+                "description": "列出角色关系（可按角色过滤）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "character_id": {
+                            "type": "integer",
+                            "description": "可选，只返回与该角色相关的关系",
+                        },
+                        "limit": {"type": "integer"},
+                    },
                     "additionalProperties": False,
                 },
             },
@@ -585,8 +693,14 @@ def _handle_list_chapters(session: Session, project_id: str, args: dict[str, Any
 def _handle_get_chapter(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
     chapter_id = int(args["chapter_id"])
     chapter = _chapter_in_project(session, project_id, chapter_id)
-    include_content = args.get("include_content", True)
-    data = {
+    mode = str(args.get("mode") or "").strip().lower()
+    if not mode:
+        include_content = args.get("include_content", True)
+        mode = "full" if include_content is not False else "summary"
+    if mode not in {"summary", "full", "segment"}:
+        raise ToolError("mode 只能是 summary / full / segment")
+
+    data: dict[str, Any] = {
         "id": chapter.id,
         "sequence": chapter.sequence,
         "title": chapter.title,
@@ -598,56 +712,148 @@ def _handle_get_chapter(session: Session, project_id: str, args: dict[str, Any])
         "current_time": chapter.current_time,
         "pov_character": chapter.pov_character,
         "word_count": chapter.word_count,
+        "mode": mode,
+        "content_length": len(chapter.content or ""),
     }
-    if include_content:
-        content = chapter.content or ""
-        data["content"] = content if len(content) <= MAX_TEXT_FIELD else content[:MAX_TEXT_FIELD] + "…"
+    content = chapter.content or ""
+    if mode == "summary":
+        data["preview"] = _clip(content, 400)
+        return data
+    if mode == "segment":
+        offset = max(0, int(args.get("offset") or 0))
+        limit = max(1, min(int(args.get("limit") or 2000), 8000))
+        segment = content[offset : offset + limit]
+        data["offset"] = offset
+        data["limit"] = limit
+        data["segment"] = segment
+        data["has_more"] = offset + limit < len(content)
+        return data
+
+    data["content"] = content if len(content) <= MAX_TEXT_FIELD else content[:MAX_TEXT_FIELD] + "…"
+    data["truncated"] = len(content) > MAX_TEXT_FIELD
     return data
+
+
+def _handle_search_chapters(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    _require_project(session, project_id)
+    query = str(args.get("query") or "").strip()
+    if not query:
+        raise ToolError("query 不能为空")
+    limit = max(1, min(int(args.get("limit") or 10), MAX_SEARCH_RESULTS))
+    chapters = session.exec(
+        select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.sequence)
+    ).all()
+    q_lower = query.lower()
+    items: list[dict[str, Any]] = []
+    for chapter in chapters:
+        title = chapter.title or ""
+        summary = chapter.summary or ""
+        content = chapter.content or ""
+        blob = f"{title}\n{summary}\n{content}"
+        if q_lower not in blob.lower():
+            continue
+        # 优先标题/摘要命中；正文则给上下文片段
+        hit_field = "title" if q_lower in title.lower() else ("summary" if q_lower in summary.lower() else "content")
+        snippet = ""
+        if hit_field == "content" and content:
+            idx = content.lower().find(q_lower)
+            if idx >= 0:
+                start = max(0, idx - 40)
+                end = min(len(content), idx + len(query) + 80)
+                snippet = ("…" if start > 0 else "") + content[start:end] + ("…" if end < len(content) else "")
+            else:
+                snippet = _clip(content, 120)
+        else:
+            snippet = _clip(summary or content, 160)
+        items.append(
+            {
+                "id": chapter.id,
+                "sequence": chapter.sequence,
+                "title": title,
+                "status": chapter.status,
+                "word_count": chapter.word_count,
+                "hit_field": hit_field,
+                "snippet": snippet,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return {"query": query, "count": len(items), "items": items}
+
+
+def _handle_get_setting(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    entry = _setting_in_project(session, project_id, int(args["setting_id"]))
+    return {
+        "id": entry.id,
+        "title": entry.title,
+        "content": entry.content if len(entry.content or "") <= MAX_TEXT_FIELD else (entry.content or "")[:MAX_TEXT_FIELD] + "…",
+        "category_id": entry.category_id,
+        "importance": entry.importance,
+        "is_active": entry.is_active,
+        "tags": entry.tags or [],
+    }
+
+
+def _handle_get_character(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    character = _character_in_project(session, project_id, int(args["character_id"]))
+    return {
+        "id": character.id,
+        "name": character.name,
+        "summary": character.summary,
+        "aliases": character.aliases or [],
+        "status": character.status,
+        "data": character.data or {},
+        "image_url": getattr(character, "image_url", None),
+    }
 
 
 def _handle_search_settings(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
     _require_project(session, project_id)
-    query = str(args.get("query") or "")
+    query = str(args.get("query") or "").strip()
     limit = max(1, min(int(args.get("limit") or 10), MAX_SEARCH_RESULTS))
-    entries = session.exec(select(SettingEntry).where(SettingEntry.project_id == project_id)).all()
-    matched = []
-    for entry in entries:
-        blob = f"{entry.title}\n{entry.content}\n{' '.join(entry.tags or [])}"
-        if _match_query(blob, query):
-            matched.append(
-                {
-                    "id": entry.id,
-                    "title": entry.title,
-                    "content": _clip(entry.content, 400),
-                    "category_id": entry.category_id,
-                    "importance": entry.importance,
-                    "is_active": entry.is_active,
-                }
-            )
-        if len(matched) >= limit:
-            break
+    statement = select(SettingEntry).where(SettingEntry.project_id == project_id)
+    if query:
+        pattern = f"%{query}%"
+        statement = statement.where(
+            (SettingEntry.title.ilike(pattern)) | (SettingEntry.content.ilike(pattern))
+        )
+    statement = statement.limit(limit)
+    entries = session.exec(statement).all()
+    matched = [
+        {
+            "id": entry.id,
+            "title": entry.title,
+            "content": _clip(entry.content, 400),
+            "category_id": entry.category_id,
+            "importance": entry.importance,
+            "is_active": entry.is_active,
+        }
+        for entry in entries
+    ]
     return {"query": query, "count": len(matched), "items": matched}
 
 
 def _handle_search_characters(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
     _require_project(session, project_id)
-    query = str(args.get("query") or "")
+    query = str(args.get("query") or "").strip()
     limit = max(1, min(int(args.get("limit") or 10), MAX_SEARCH_RESULTS))
     characters = session.exec(select(Character).where(Character.project_id == project_id)).all()
     matched = []
     for character in characters:
-        blob = f"{character.name}\n{character.summary or ''}\n{' '.join(character.aliases or [])}"
-        if _match_query(blob, query):
-            matched.append(
-                {
-                    "id": character.id,
-                    "name": character.name,
-                    "summary": _clip(character.summary, 300),
-                    "aliases": character.aliases or [],
-                    "status": character.status,
-                    "data": character.data or {},
-                }
-            )
+        if query:
+            blob = f"{character.name}\n{character.summary or ''}\n{' '.join(character.aliases or [])}"
+            if not _match_query(blob, query):
+                continue
+        matched.append(
+            {
+                "id": character.id,
+                "name": character.name,
+                "summary": _clip(character.summary, 300),
+                "aliases": character.aliases or [],
+                "status": character.status,
+                "data": character.data or {},
+            }
+        )
         if len(matched) >= limit:
             break
     return {"query": query, "count": len(matched), "items": matched}
@@ -675,25 +881,140 @@ def _handle_list_outlines(session: Session, project_id: str, args: dict[str, Any
 
 def _handle_search_memories(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
     _require_project(session, project_id)
-    query = str(args.get("query") or "")
+    query = str(args.get("query") or "").strip()
     limit = max(1, min(int(args.get("limit") or 10), MAX_SEARCH_RESULTS))
-    memories = session.exec(select(MemoryEntry).where(MemoryEntry.project_id == project_id)).all()
-    matched = []
-    for memory in memories:
-        if _match_query(memory.content or "", query):
-            matched.append(
-                {
-                    "id": memory.id,
-                    "content": _clip(memory.content, 400),
-                    "scope": memory.scope,
-                    "memory_type": getattr(memory, "memory_type", None),
-                    "chapter_id": memory.chapter_id,
-                    "character_id": memory.character_id,
-                }
-            )
-        if len(matched) >= limit:
-            break
+    statement = select(MemoryEntry).where(MemoryEntry.project_id == project_id)
+    if query:
+        statement = statement.where(MemoryEntry.content.ilike(f"%{query}%"))
+    statement = statement.order_by(MemoryEntry.id.desc()).limit(limit)
+    memories = session.exec(statement).all()
+    matched = [
+        {
+            "id": memory.id,
+            "content": _clip(memory.content, 400),
+            "scope": memory.scope,
+            "memory_type": getattr(memory, "memory_type", None),
+            "chapter_id": memory.chapter_id,
+            "character_id": memory.character_id,
+        }
+        for memory in memories
+    ]
     return {"query": query, "count": len(matched), "items": matched}
+
+
+def _storyboard_in_project(session: Session, project_id: str, item_id: int) -> StoryboardItem:
+    item = session.get(StoryboardItem, item_id)
+    if not item or item.project_id != project_id:
+        raise ToolError(f"Storyboard item not found: {item_id}")
+    return item
+
+
+def _summarize_storyboard_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    summary: dict[str, Any] = {}
+    for key in (
+        "scene",
+        "description",
+        "dialogue",
+        "action",
+        "camera",
+        "shot_type",
+        "characters",
+        "location",
+        "mood",
+        "prompt",
+    ):
+        if key in data and data[key] is not None:
+            value = data[key]
+            if isinstance(value, str):
+                summary[key] = _clip(value, 300)
+            elif isinstance(value, list):
+                summary[key] = value[:20]
+            else:
+                summary[key] = value
+    return summary
+
+
+def _handle_list_storyboard(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    _require_project(session, project_id)
+    limit = max(1, min(int(args.get("limit") or 50), 100))
+    statement = select(StoryboardItem).where(StoryboardItem.project_id == project_id)
+    chapter_id = args.get("chapter_id")
+    if chapter_id is not None:
+        chapter_id = int(chapter_id)
+        _chapter_in_project(session, project_id, chapter_id)
+        statement = statement.where(StoryboardItem.chapter_id == chapter_id)
+    statement = statement.order_by(StoryboardItem.sequence)
+    items_all = session.exec(statement).all()
+    items = []
+    for item in items_all[:limit]:
+        data = item.data if isinstance(item.data, dict) else {}
+        items.append(
+            {
+                "id": item.id,
+                "sequence": item.sequence,
+                "chapter_id": item.chapter_id,
+                "status": item.status,
+                "image_url": item.image_url,
+                "summary": _clip(
+                    data.get("description")
+                    or data.get("scene")
+                    or data.get("prompt")
+                    or "",
+                    200,
+                ),
+                "characters": (data.get("characters") or [])[:10]
+                if isinstance(data.get("characters"), list)
+                else data.get("characters"),
+            }
+        )
+    return {"total": len(items_all), "items": items}
+
+
+def _handle_get_storyboard_item(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    item = _storyboard_in_project(session, project_id, int(args["item_id"]))
+    return {
+        "id": item.id,
+        "sequence": item.sequence,
+        "chapter_id": item.chapter_id,
+        "status": item.status,
+        "image_url": item.image_url,
+        "selected_outfits": item.selected_outfits or {},
+        "prompt_cache": _clip(item.prompt_cache, 500) if item.prompt_cache else None,
+        "data": _summarize_storyboard_data(item.data),
+    }
+
+
+def _handle_list_relationships(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
+    _require_project(session, project_id)
+    limit = max(1, min(int(args.get("limit") or 50), 100))
+    statement = select(CharacterRelationship).where(CharacterRelationship.project_id == project_id)
+    character_id = args.get("character_id")
+    if character_id is not None:
+        character_id = int(character_id)
+        _character_in_project(session, project_id, character_id)
+        statement = statement.where(
+            (CharacterRelationship.source_character_id == character_id)
+            | (CharacterRelationship.target_character_id == character_id)
+        )
+    statement = statement.limit(limit)
+    rows = session.exec(statement).all()
+    items = [
+        {
+            "id": row.id,
+            "source_character_id": row.source_character_id,
+            "target_character_id": row.target_character_id,
+            "relationship_type": row.relationship_type,
+            "description": _clip(row.description, 300),
+            "status": row.status,
+            "intensity": row.intensity,
+            "chapter_id": row.chapter_id,
+            "tags": row.tags or [],
+        }
+        for row in rows
+    ]
+    return {"count": len(items), "items": items}
 
 
 def _handle_get_progress(session: Session, project_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -1234,10 +1555,16 @@ TOOL_HANDLERS: dict[str, Callable[[Session, str, dict[str, Any]], Any]] = {
     "get_project": _handle_get_project,
     "list_chapters": _handle_list_chapters,
     "get_chapter": _handle_get_chapter,
+    "search_chapters": _handle_search_chapters,
+    "get_setting": _handle_get_setting,
+    "get_character": _handle_get_character,
     "search_settings": _handle_search_settings,
     "search_characters": _handle_search_characters,
     "list_outlines": _handle_list_outlines,
     "search_memories": _handle_search_memories,
+    "list_storyboard": _handle_list_storyboard,
+    "get_storyboard_item": _handle_get_storyboard_item,
+    "list_relationships": _handle_list_relationships,
     "get_progress": _handle_get_progress,
     "update_project": _handle_update_project,
     "update_chapter": _handle_update_chapter,

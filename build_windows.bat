@@ -28,4 +28,4 @@ echo Packaging backend server...
 python -m PyInstaller --noconfirm AI-Comic-Generator.spec
 if errorlevel 1 exit /b 1
 
-echo Done. Run dist\AI-Comic-Generator\AI-Comic-Generator.exe and open http://127.0.0.1:8000
+echo Done. Run dist\AI-Comic-Generator\AI-Comic-Generator.exe and open http://127.0.0.1:58080

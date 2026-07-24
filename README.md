@@ -98,7 +98,7 @@ Start backend service:
 ..\start_backend.bat
 
 # Or run manually
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 58080
 ```
 
 ### 2. Frontend Configuration
@@ -125,7 +125,7 @@ Start frontend service:
 pnpm dev
 ```
 
-Access in browser: `http://localhost:5173`
+Access in browser: `http://127.0.0.1:55173`
 
 ## 📖 User Guide
 

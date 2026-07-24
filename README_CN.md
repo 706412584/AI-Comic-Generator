@@ -97,7 +97,7 @@ alembic upgrade head
 ..\start_backend.bat
 
 # 或者手动运行
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 58080
 ```
 
 ### 2. 前端配置
@@ -124,7 +124,7 @@ pnpm install
 pnpm dev
 ```
 
-访问浏览器：`http://localhost:5173`
+访问浏览器：`http://127.0.0.1:55173`
 
 ## 📖 使用指南
 

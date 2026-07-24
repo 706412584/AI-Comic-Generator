@@ -11,7 +11,15 @@ from sqlmodel import Session, select
 
 from app.core.database import engine, init_db
 from app.main import app
-from app.models.models import Chapter, Character, Project, SettingEntry, Task
+from app.models.models import (
+    Chapter,
+    Character,
+    CharacterRelationship,
+    Project,
+    SettingEntry,
+    StoryboardItem,
+    Task,
+)
 from app.services.assistant_chat_runner import run_assistant_chat_task
 from app.services.assistant_tools import ToolError, execute_tool, openai_tool_definitions
 
@@ -46,8 +54,14 @@ class AssistantToolsTest(unittest.TestCase):
             "get_project",
             "list_chapters",
             "get_chapter",
+            "search_chapters",
+            "get_setting",
+            "get_character",
             "search_settings",
             "search_characters",
+            "list_storyboard",
+            "get_storyboard_item",
+            "list_relationships",
             "update_project",
             "create_chapter",
             "update_chapter",
@@ -197,7 +211,10 @@ class AssistantToolsTest(unittest.TestCase):
                 "tool_calls": None,
             }
 
-        with patch("app.services.assistant_chat_runner.AIService.chat_completion", fake_chat):
+        with patch(
+            "app.services.assistant_chat_runner.text_provider_supports_tools",
+            return_value=(True, "openai_compatible"),
+        ), patch("app.services.assistant_chat_runner.AIService.chat_completion", fake_chat):
             run_assistant_chat_task(task_id)
 
         with Session(engine) as session:
@@ -391,6 +408,124 @@ class AssistantToolsTest(unittest.TestCase):
         self.assertEqual(enqueued[0][1], "source_analysis")
         self.assertEqual(enqueued[0][2]["mode"], "all")
         self.assertIsNone(enqueued[0][2]["max_chapters"])
+
+    def test_storyboard_and_relationship_tools(self):
+        project_id = self.create_project()
+        with Session(engine) as session:
+            chapter = Chapter(project_id=project_id, sequence=1, title="第一章", content="正文")
+            session.add(chapter)
+            session.flush()
+            c1 = Character(project_id=project_id, name="甲")
+            c2 = Character(project_id=project_id, name="乙")
+            session.add(c1)
+            session.add(c2)
+            session.flush()
+            item = StoryboardItem(
+                project_id=project_id,
+                chapter_id=chapter.id,
+                sequence=1,
+                data={"description": "雨夜对峙", "characters": ["甲", "乙"], "prompt": "cinematic"},
+            )
+            session.add(item)
+            rel = CharacterRelationship(
+                project_id=project_id,
+                source_character_id=c1.id,
+                target_character_id=c2.id,
+                relationship_type="宿敌",
+                description="互相制衡",
+            )
+            session.add(rel)
+            session.commit()
+            chapter_id = chapter.id
+            item_id = item.id
+            c1_id = c1.id
+            setting = SettingEntry(project_id=project_id, title="灵根", content="双灵根稀有")
+            session.add(setting)
+            session.commit()
+            setting_id = setting.id
+
+        with Session(engine) as session:
+            raw = execute_tool(session, project_id, "list_storyboard", {"chapter_id": chapter_id})
+            data = json.loads(raw)
+            self.assertTrue(data["ok"])
+            self.assertGreaterEqual(data["result"]["total"], 1)
+            self.assertEqual(data["result"]["items"][0]["id"], item_id)
+
+            raw = execute_tool(session, project_id, "get_storyboard_item", {"item_id": item_id})
+            detail = json.loads(raw)["result"]
+            self.assertEqual(detail["id"], item_id)
+            self.assertIn("雨夜", detail["data"].get("description", ""))
+
+            raw = execute_tool(session, project_id, "list_relationships", {"character_id": c1_id})
+            rels = json.loads(raw)["result"]
+            self.assertGreaterEqual(rels["count"], 1)
+            self.assertEqual(rels["items"][0]["relationship_type"], "宿敌")
+
+            raw = execute_tool(session, project_id, "get_character", {"character_id": c1_id})
+            self.assertEqual(json.loads(raw)["result"]["name"], "甲")
+
+            raw = execute_tool(session, project_id, "get_setting", {"setting_id": setting_id})
+            self.assertEqual(json.loads(raw)["result"]["title"], "灵根")
+
+    def test_search_chapters_and_get_chapter_modes(self):
+        project_id = self.create_project()
+        with Session(engine) as session:
+            chapter = Chapter(
+                project_id=project_id,
+                sequence=1,
+                title="雨夜对峙",
+                summary="主角与宿敌在桥上对峙",
+                content="开场：" + ("甲" * 100) + "关键冲突爆发" + ("乙" * 100) + "收束。",
+            )
+            session.add(chapter)
+            session.commit()
+            session.refresh(chapter)
+            chapter_id = chapter.id
+
+        with Session(engine) as session:
+            raw = execute_tool(session, project_id, "search_chapters", {"query": "关键冲突"})
+            data = json.loads(raw)
+            self.assertTrue(data["ok"])
+            self.assertGreaterEqual(data["result"]["count"], 1)
+            self.assertEqual(data["result"]["items"][0]["id"], chapter_id)
+            self.assertEqual(data["result"]["items"][0]["hit_field"], "content")
+            self.assertIn("关键冲突", data["result"]["items"][0]["snippet"])
+
+            summary = json.loads(
+                execute_tool(
+                    session,
+                    project_id,
+                    "get_chapter",
+                    {"chapter_id": chapter_id, "mode": "summary"},
+                )
+            )["result"]
+            self.assertEqual(summary["mode"], "summary")
+            self.assertNotIn("content", summary)
+            self.assertIn("preview", summary)
+
+            segment = json.loads(
+                execute_tool(
+                    session,
+                    project_id,
+                    "get_chapter",
+                    {"chapter_id": chapter_id, "mode": "segment", "offset": 0, "limit": 40},
+                )
+            )["result"]
+            self.assertEqual(segment["mode"], "segment")
+            self.assertEqual(segment["offset"], 0)
+            self.assertLessEqual(len(segment["segment"]), 40)
+            self.assertTrue(segment["has_more"])
+
+            full = json.loads(
+                execute_tool(
+                    session,
+                    project_id,
+                    "get_chapter",
+                    {"chapter_id": chapter_id, "include_content": True},
+                )
+            )["result"]
+            self.assertEqual(full["mode"], "full")
+            self.assertIn("content", full)
 
 
 if __name__ == "__main__":

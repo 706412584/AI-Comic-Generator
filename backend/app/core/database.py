@@ -63,6 +63,9 @@ SQLITE_COLUMN_DEFAULTS = {
         "analysis_error": "VARCHAR",
         "analysis_attempts": "INTEGER DEFAULT 0",
     },
+    "modelconfig": {
+        "is_default": "BOOLEAN DEFAULT 0",
+    },
 }
 
 def _ensure_sqlite_columns():

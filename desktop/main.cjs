@@ -8,7 +8,8 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 
 const IS_DEV = process.argv.includes('--dev')
-const PREFERRED_PORTS = [48730, 48731, 48732, 48733, 48734]
+// 5 位端口，避开常见 4 位开发端口
+const PREFERRED_PORTS = [58080, 58081, 58082, 58083, 58084]
 const EXPECTED_BACKEND_APP = 'AI Comic Generator'
 const HEALTH_TIMEOUT_MS = 60_000
 const HEALTH_POLL_INTERVAL_MS = 500

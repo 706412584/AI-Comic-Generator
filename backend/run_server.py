@@ -12,7 +12,7 @@ def main() -> None:
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("COMIC_APP_PORT", "8000")),
+        default=int(os.environ.get("COMIC_APP_PORT", "58080")),
     )
     args = parser.parse_args()
 

@@ -20,6 +20,7 @@ class ModelConfigUpdate(BaseModel):
     model_name: Optional[str] = None
     model_type: Optional[str] = None
     is_active: Optional[bool] = None
+    is_default: Optional[bool] = None
 
 # Read Models for nested response
 class CharacterOutfitCreate(CharacterOutfitBase):
@@ -355,6 +356,8 @@ class ProjectRead(ProjectBase):
 # Assistant workbench chat
 class AgentMessageCreate(BaseModel):
     content: str
+    conversation_id: Optional[int] = None
+    allow_writes: Optional[bool] = True
 
 
 class AgentMessageRead(BaseModel):
@@ -376,9 +379,26 @@ class AgentConversationRead(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    tools_enabled: Optional[bool] = None
+    text_provider: Optional[str] = None
+    active_task_id: Optional[str] = None
+    message_count: Optional[int] = None
+
+
+class AgentConversationCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class AgentConversationUpdate(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
 
 
 class AssistantChatResponse(BaseModel):
     conversation_id: int
     user_message: AgentMessageRead
     task_id: str
+
+
+class AssistantRegenerateRequest(BaseModel):
+    allow_writes: Optional[bool] = True

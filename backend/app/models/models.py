@@ -12,6 +12,8 @@ class ModelConfigBase(SQLModel):
     model_name: str
     model_type: str
     is_active: bool = True
+    # 同类型可多启用；运行时优先用 is_default=True 的那条
+    is_default: bool = False
 
 class ProjectBase(SQLModel):
     title: str

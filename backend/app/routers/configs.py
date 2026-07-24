@@ -167,16 +167,17 @@ def _test_openai_compatible(payload: TestConfigInput) -> str:
             except requests.RequestException as exc:
                 errors.append(f"{url}: {exc}")
         raise HTTPException(status_code=502, detail="测试失败: " + "; ".join(errors))
-    # 图片模型：验证 key 与模型存在即可，不做真实生成
+    # 图片 / 图片编辑：验证 key 与模型存在即可，不做真实生成
     models = _fetch_models_openai_compatible(payload.base_url, payload.api_key)
+    kind = "图片编辑" if payload.model_type == "image_edit" else "图片"
     if any(m["id"] == payload.model_name for m in models):
-        return "API Key 有效，模型存在（图片模型不做真实生成测试）"
+        return f"API Key 有效，模型存在（{kind}模型不做真实生成测试）"
     return "API Key 有效（上游模型列表未包含该模型，可能仍可用）"
 
 
 @router.post("/test")
 def test_config(payload: TestConfigInput):
-    """保存前测试连通性：文本模型发送最小 ping 请求，图片模型校验 key 与模型存在。"""
+    """保存前测试连通性：文本模型发送最小 ping 请求，图片/图片编辑校验 key 与模型存在。"""
     provider = payload.provider.lower().replace("-", "_")
     start = time.monotonic()
     if provider == "google":
@@ -209,6 +210,15 @@ def update_config(config_id: int, config_in: ModelConfigUpdate, session: Session
     if not config:
         raise HTTPException(status_code=404, detail="Config not found")
     return crud_config.update_model_config(session, config, config_in)
+
+@router.post("/{config_id}/set-default", response_model=ModelConfig)
+def set_default_config(config_id: int, session: Session = Depends(get_session)):
+    """将指定配置设为同类型默认（自动启用，并取消同类型其它默认）。"""
+    try:
+        return crud_config.set_default_config(session, config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.delete("/{config_id}")
 def delete_config(config_id: int, session: Session = Depends(get_session)):

@@ -2,6 +2,7 @@ import base64
 import json
 import logging
 import os
+import re
 import time
 from typing import TYPE_CHECKING, Callable, List, Optional
 from urllib.parse import urlparse
@@ -95,6 +96,41 @@ class AIService:
             "tool_calls": tool_calls if tool_calls else None,
         }
 
+    def chat_completion_stream(
+        self,
+        messages: list[dict],
+        *,
+        temperature: float = 0.7,
+        on_delta: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """多轮 messages 真流式（不支持 tools）。on_delta 以累计全文回调。
+
+        仅 openai_compatible 支持真流式；其它 provider 或流式失败回退非流式 chat_completion。
+        """
+        config = self._get_config("text")
+        provider = self._provider_name(config)
+
+        if provider != "openai_compatible":
+            response = self.chat_completion(messages, tools=None, tool_choice=None, temperature=temperature)
+            content = (response.get("content") or "") if isinstance(response.get("content"), str) else ""
+            if on_delta and content:
+                on_delta(content)
+            return content
+
+        try:
+            return self._chat_completion_stream_openai_compatible(
+                config, messages, temperature=temperature, on_delta=on_delta
+            )
+        except _StreamCallbackError as exc:
+            raise exc.original
+        except Exception as exc:
+            logger.warning(f"Chat stream request failed, falling back to non-streaming: {exc}")
+            response = self.chat_completion(messages, tools=None, tool_choice=None, temperature=temperature)
+            content = (response.get("content") or "") if isinstance(response.get("content"), str) else ""
+            if on_delta and content:
+                on_delta(content)
+            return content
+
     def generate_text_stream(
         self,
         system_prompt: str,
@@ -106,40 +142,26 @@ class AIService:
         仅 openai_compatible 支持真流式；其他 provider 或流式请求失败（且未收到任何内容）
         时自动回退到非流式请求。on_delta 抛出的异常（如任务取消）会向上传播并中断请求。
         """
-        config = self._get_config("text")
-        provider = self._provider_name(config)
+        return self.chat_completion_stream(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_input},
+            ],
+            on_delta=on_delta,
+        )
 
-        if provider != "openai_compatible":
-            content = self.generate_text(system_prompt, user_input)
-            if on_delta and content:
-                on_delta(content)
-            return content
-
-        try:
-            return self._generate_text_stream_openai_compatible(config, system_prompt, user_input, on_delta)
-        except _StreamCallbackError as exc:
-            raise exc.original
-        except Exception as exc:
-            logger.warning(f"Streaming request failed, falling back to non-streaming: {exc}")
-            content = self._generate_text_openai_compatible(config, system_prompt, user_input)
-            if on_delta and content:
-                on_delta(content)
-            return content
-
-    def _generate_text_stream_openai_compatible(
+    def _chat_completion_stream_openai_compatible(
         self,
         config,
-        system_prompt: str,
-        user_input: str,
+        messages: list[dict],
+        *,
+        temperature: float = 0.7,
         on_delta: Optional[Callable[[str], None]] = None,
     ) -> str:
         payload = {
             "model": config.model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input},
-            ],
-            "temperature": 0.7,
+            "messages": messages,
+            "temperature": temperature,
             "stream": True,
         }
 
@@ -276,12 +298,20 @@ class AIService:
 
     def _post_openai_compatible_with_fallbacks(self, config, path: str, payloads: List[dict], timeout: int = 300):
         errors = []
+        seen = set()
         for payload in payloads:
             try:
                 return self._post_openai_compatible(config, path, payload, timeout)
             except ValueError as exc:
-                errors.append(str(exc))
-        raise ValueError("OpenAI-compatible request failed: " + "; ".join(errors))
+                msg = str(exc)
+                # 多 payload 回退常撞同一上游错误，去重后只保留一条
+                if msg not in seen:
+                    seen.add(msg)
+                    errors.append(msg)
+        # 已含 "OpenAI-compatible request failed" 前缀时不再套一层
+        if len(errors) == 1:
+            raise ValueError(errors[0])
+        raise ValueError("OpenAI-compatible request failed after fallbacks: " + " | ".join(errors))
 
     def _size_from_ratio(self, aspect_ratio: str, resolution: str) -> str:
         ratio = (aspect_ratio or "").strip()
@@ -397,6 +427,35 @@ class AIService:
         return content
 
     def generate_image(self, prompt: str, context_images: List[str] = None, aspect_ratio: str = "16:9", resolution: str = "2K") -> bytes:
+        """文生图走 image 槽；有参考图时 openai_compatible 改走 image_edit 槽（/images/edits）。"""
+        context_images = [p for p in (context_images or []) if p]
+
+        # OpenAI 兼容链路无法在 generations 里吃多图上下文：有参考图必须用编辑槽
+        if context_images:
+            try:
+                edit_config = self._get_config("image_edit")
+            except ValueError:
+                edit_config = None
+            if edit_config and self._provider_name(edit_config) == "openai_compatible":
+                return self._edit_image_openai_compatible(
+                    edit_config,
+                    prompt,
+                    context_images[-1],
+                    aspect_ratio,
+                    resolution,
+                )
+            if edit_config is None:
+                # 仅当当前 image 配置是 openai 时强制要求 image_edit，避免 Grok 静默丢参考图
+                try:
+                    image_config = self._get_config("image")
+                except ValueError:
+                    image_config = None
+                if image_config and self._provider_name(image_config) == "openai_compatible":
+                    raise ValueError(
+                        "当前图片生成使用 OpenAI 兼容接口且带有参考图，请在模型配置中单独添加类型为「图片编辑」"
+                        "的配置（例如 grok-imagine-edit），并设为默认。"
+                    )
+
         config = self._get_config("image")
         provider = self._provider_name(config)
 
@@ -407,23 +466,27 @@ class AIService:
 
         raise NotImplementedError(f"Provider {config.provider} not supported yet.")
 
-    def _generate_image_openai_compatible(self, config, prompt: str, aspect_ratio: str, resolution: str) -> bytes:
-        size = self._size_from_ratio(aspect_ratio, resolution)
-        full_payload = {
-            "model": config.model_name,
-            "prompt": prompt,
-            "n": 1,
-            "size": size,
-            "response_format": "b64_json",
-        }
-        minimal_payload = {
-            "model": config.model_name,
-            "prompt": prompt,
-            "n": 1,
-            "size": size,
-        }
+    def edit_image(
+        self,
+        prompt: str,
+        image_path: str,
+        aspect_ratio: str = "16:9",
+        resolution: str = "2K",
+    ) -> bytes:
+        """按 image_edit 槽编辑已有图片（对齐 media-gen edit_image）。"""
+        config = self._get_config("image_edit")
+        provider = self._provider_name(config)
+        if provider == "openai_compatible":
+            return self._edit_image_openai_compatible(config, prompt, image_path, aspect_ratio, resolution)
+        if provider == "google":
+            # Google 图片模型用多模态「参考图 + 指令」完成编辑
+            return self._generate_image_google(prompt, [image_path], aspect_ratio, resolution)
+        raise NotImplementedError(f"Provider {config.provider} not supported for image edit.")
 
-        data = self._post_openai_compatible_with_fallbacks(config, "/images/generations", [minimal_payload, full_payload], timeout=600)
+    def _is_grok_image_model(self, model_name: str) -> bool:
+        return bool(model_name and re.match(r"(?i)^grok-imagine-(?:image|edit)(?:-|$)", model_name))
+
+    def _decode_image_response(self, data: dict) -> bytes:
         try:
             first_image = data["data"][0]
         except (KeyError, IndexError, TypeError):
@@ -438,6 +501,118 @@ class AIService:
             return self._download_image(image_url)
 
         raise ValueError("OpenAI-compatible image response missing b64_json or url.")
+
+    def _generate_image_openai_compatible(self, config, prompt: str, aspect_ratio: str, resolution: str) -> bytes:
+        size = self._size_from_ratio(aspect_ratio, resolution)
+        is_grok = self._is_grok_image_model(config.model_name)
+
+        # Grok Imagine：用 aspect_ratio/resolution，不传 size（对齐 media-gen buildImageBody）
+        # 顺序：full（含 response_format）→ minimal，与 media-gen Attempt1/3 一致
+        if is_grok:
+            base_payload: dict = {
+                "model": config.model_name,
+                "prompt": prompt,
+                "n": 1,
+            }
+            if aspect_ratio:
+                base_payload["aspect_ratio"] = aspect_ratio
+            if resolution:
+                res = resolution.strip().lower()
+                base_payload["resolution"] = res if res in ("1k", "2k") else ("2k" if "2" in res else "1k")
+            full_payload = {**base_payload, "response_format": "b64_json"}
+            data = self._post_openai_compatible_with_fallbacks(
+                config, "/images/generations", [full_payload, base_payload], timeout=600
+            )
+            return self._decode_image_response(data)
+
+        full_payload = {
+            "model": config.model_name,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+            "response_format": "b64_json",
+        }
+        minimal_payload = {
+            "model": config.model_name,
+            "prompt": prompt,
+            "n": 1,
+            "size": size,
+        }
+
+        data = self._post_openai_compatible_with_fallbacks(
+            config, "/images/generations", [full_payload, minimal_payload], timeout=600
+        )
+        return self._decode_image_response(data)
+
+    def _load_local_image_bytes(self, image_path: str) -> tuple[bytes, str]:
+        if not image_path or not os.path.exists(image_path):
+            raise ValueError(f"Reference image not found: {image_path}")
+        with open(image_path, "rb") as fh:
+            raw = fh.read()
+        if not raw:
+            raise ValueError(f"Reference image is empty: {image_path}")
+        lower = image_path.lower()
+        if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+            mime = "image/jpeg"
+            filename = "reference.jpg"
+        elif lower.endswith(".webp"):
+            mime = "image/webp"
+            filename = "reference.webp"
+        else:
+            mime = "image/png"
+            filename = "reference.png"
+        return raw, filename
+
+    def _edit_image_openai_compatible(
+        self,
+        config,
+        prompt: str,
+        image_path: str,
+        aspect_ratio: str,
+        resolution: str,
+    ) -> bytes:
+        """multipart POST /images/edits（media-gen editWithFallback 精简版）。"""
+        size = self._size_from_ratio(aspect_ratio, resolution)
+        raw, filename = self._load_local_image_bytes(image_path)
+        is_grok = self._is_grok_image_model(config.model_name)
+
+        def build_files_and_data(minimal: bool):
+            files = {"image": (filename, raw, "application/octet-stream")}
+            data = {
+                "model": config.model_name,
+                "prompt": prompt,
+                "n": "1",
+            }
+            if not is_grok:
+                data["size"] = size
+            if not minimal:
+                data["response_format"] = "b64_json"
+            return files, data
+
+        errors = []
+        for minimal in (True, False):
+            files, form_data = build_files_and_data(minimal)
+            for url in self._openai_compatible_urls(config.base_url, "/images/edits"):
+                try:
+                    response = requests.post(
+                        url,
+                        headers={"Authorization": f"Bearer {config.api_key}"},
+                        data=form_data,
+                        files=files,
+                        timeout=600,
+                    )
+                    try:
+                        payload = response.json()
+                    except ValueError:
+                        payload = {"raw": response.text}
+                    if response.ok:
+                        return self._decode_image_response(payload)
+                    message = self._pick_error(payload, f"HTTP {response.status_code}")
+                    errors.append(f"{url}: {message}")
+                except requests.RequestException as exc:
+                    errors.append(f"{url}: {exc}")
+
+        raise ValueError("OpenAI-compatible image edit failed: " + "; ".join(errors))
 
     def _generate_image_google(self, prompt: str, context_images: List[str] = None, aspect_ratio: str = "16:9", resolution: str = "2K") -> bytes:
         from google.genai import types
