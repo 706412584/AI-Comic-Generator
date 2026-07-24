@@ -55,6 +55,12 @@ class AssistantToolsTest(unittest.TestCase):
             "update_setting",
             "create_character",
             "update_character",
+            "start_project_initialization",
+            "start_generate_all_images",
+            "start_generate_all_characters",
+            "start_chapter_content",
+            "start_chapter_storyboard",
+            "start_source_analysis",
         ):
             self.assertIn(required, names)
 
@@ -204,6 +210,187 @@ class AssistantToolsTest(unittest.TestCase):
                 select(Character).where(Character.project_id == project_id)
             ).all()
             self.assertTrue(any(c.name == "零号" for c in characters))
+
+    def test_start_project_initialization_dispatches(self):
+        project_id = self.create_project("空项目初始化")
+        enqueued = []
+
+        with Session(engine) as session:
+            with patch(
+                "app.services.assistant_tools._enqueue_task",
+                side_effect=lambda tid, ttype, payload: enqueued.append((tid, ttype, payload)),
+            ):
+                raw = execute_tool(
+                    session,
+                    project_id,
+                    "start_project_initialization",
+                    {"user_input": "赛博都市里的改造人少女"},
+                )
+            data = json.loads(raw)
+            self.assertTrue(data["ok"])
+            task_id = data["result"]["task_id"]
+            self.assertEqual(data["result"]["task_type"], "project_initialization")
+
+        self.assertEqual(len(enqueued), 1)
+        self.assertEqual(enqueued[0][0], task_id)
+        self.assertEqual(enqueued[0][1], "project_initialization")
+        self.assertEqual(enqueued[0][2]["user_input"], "赛博都市里的改造人少女")
+
+        with Session(engine) as session:
+            task = session.get(Task, task_id)
+            self.assertIsNotNone(task)
+            self.assertEqual(task.type, "project_initialization")
+            self.assertEqual(task.status, "pending")
+            self.assertEqual(task.input_payload["project_id"], project_id)
+            project = session.get(Project, project_id)
+            self.assertEqual(project.story_input, "赛博都市里的改造人少女")
+
+    def test_start_project_initialization_rejects_non_empty(self):
+        project_id = self.create_project("已有内容")
+        with Session(engine) as session:
+            session.add(Character(project_id=project_id, name="已有角色"))
+            session.commit()
+
+        with Session(engine) as session:
+            with patch("app.services.assistant_tools._enqueue_task") as mock_enqueue:
+                with self.assertRaises(ToolError) as ctx:
+                    execute_tool(
+                        session,
+                        project_id,
+                        "start_project_initialization",
+                        {"user_input": "再初始化一次"},
+                    )
+                mock_enqueue.assert_not_called()
+            self.assertIn("已有", str(ctx.exception))
+
+    def test_start_generate_all_images_and_characters(self):
+        project_id = self.create_project()
+        enqueued = []
+
+        with Session(engine) as session:
+            with patch(
+                "app.services.assistant_tools._enqueue_task",
+                side_effect=lambda tid, ttype, payload: enqueued.append((tid, ttype, payload)),
+            ):
+                raw_img = execute_tool(session, project_id, "start_generate_all_images", {})
+                raw_char = execute_tool(session, project_id, "start_generate_all_characters", {})
+
+        img = json.loads(raw_img)
+        char = json.loads(raw_char)
+        self.assertTrue(img["ok"])
+        self.assertTrue(char["ok"])
+        self.assertEqual(img["result"]["task_type"], "image_generation")
+        self.assertEqual(char["result"]["task_type"], "character_generation")
+        types = {t for _, t, _ in enqueued}
+        self.assertEqual(types, {"image_generation", "character_generation"})
+        for _, t, p in enqueued:
+            self.assertEqual(p.get("project_id"), project_id)
+
+        # 运行中拒绝重复派发
+        with Session(engine) as session:
+            task = session.get(Task, img["result"]["task_id"])
+            task.status = "processing"
+            session.add(task)
+            session.commit()
+
+        with Session(engine) as session:
+            with patch("app.services.assistant_tools._enqueue_task") as mock_enqueue:
+                with self.assertRaises(ToolError) as ctx:
+                    execute_tool(session, project_id, "start_generate_all_images", {})
+                mock_enqueue.assert_not_called()
+            self.assertIn("运行", str(ctx.exception))
+
+    def test_start_chapter_content_and_storyboard(self):
+        project_id = self.create_project()
+        with Session(engine) as session:
+            chapter = Chapter(project_id=project_id, sequence=1, title="第一章", content="草稿")
+            session.add(chapter)
+            session.commit()
+            session.refresh(chapter)
+            chapter_id = chapter.id
+
+        enqueued = []
+        with Session(engine) as session:
+            with patch(
+                "app.services.assistant_tools._enqueue_task",
+                side_effect=lambda tid, ttype, payload: enqueued.append((tid, ttype, payload)),
+            ):
+                raw_c = execute_tool(
+                    session,
+                    project_id,
+                    "start_chapter_content",
+                    {"chapter_id": chapter_id, "user_input": "更紧张"},
+                )
+                raw_s = execute_tool(
+                    session,
+                    project_id,
+                    "start_chapter_storyboard",
+                    {"chapter_id": chapter_id},
+                )
+
+        content_data = json.loads(raw_c)
+        storyboard_data = json.loads(raw_s)
+        self.assertEqual(content_data["result"]["task_type"], "chapter_content_generation")
+        self.assertEqual(storyboard_data["result"]["task_type"], "chapter_storyboard")
+        self.assertEqual(content_data["result"]["chapter_id"], chapter_id)
+
+        content_payload = next(p for _, t, p in enqueued if t == "chapter_content_generation")
+        self.assertEqual(content_payload["chapter_id"], chapter_id)
+        self.assertEqual(content_payload["user_input"], "更紧张")
+        self.assertTrue(content_payload.get("save_version"))
+
+        storyboard_payload = next(p for _, t, p in enqueued if t == "chapter_storyboard")
+        self.assertEqual(storyboard_payload["chapter_id"], chapter_id)
+
+        with Session(engine) as session:
+            with self.assertRaises(ToolError):
+                execute_tool(
+                    session,
+                    project_id,
+                    "start_chapter_content",
+                    {"chapter_id": 99999999},
+                )
+
+    def test_start_source_analysis_requires_import(self):
+        project_id = self.create_project()
+        with Session(engine) as session:
+            with patch("app.services.assistant_tools._enqueue_task") as mock_enqueue:
+                with self.assertRaises(ToolError) as ctx:
+                    execute_tool(session, project_id, "start_source_analysis", {"mode": "continue"})
+                mock_enqueue.assert_not_called()
+            self.assertIn("导入", str(ctx.exception))
+
+        from app.models.models import SourceImport
+
+        with Session(engine) as session:
+            session.add(
+                SourceImport(
+                    project_id=project_id,
+                    file_name="novel.txt",
+                    raw_text="第一章 开端\n正文",
+                    text_length=20,
+                )
+            )
+            session.commit()
+
+        enqueued = []
+        with Session(engine) as session:
+            with patch(
+                "app.services.assistant_tools._enqueue_task",
+                side_effect=lambda tid, ttype, payload: enqueued.append((tid, ttype, payload)),
+            ):
+                raw = execute_tool(
+                    session,
+                    project_id,
+                    "start_source_analysis",
+                    {"mode": "all"},
+                )
+        data = json.loads(raw)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["result"]["task_type"], "source_analysis")
+        self.assertEqual(enqueued[0][1], "source_analysis")
+        self.assertEqual(enqueued[0][2]["mode"], "all")
+        self.assertIsNone(enqueued[0][2]["max_chapters"])
 
 
 if __name__ == "__main__":

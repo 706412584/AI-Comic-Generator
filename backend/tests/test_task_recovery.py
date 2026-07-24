@@ -110,6 +110,7 @@ class TaskRecoveryTest(unittest.TestCase):
                 "storyboard",
                 "image_generation",
                 "character_generation",
+                "assistant_chat",
             },
         )
 

@@ -16,6 +16,8 @@ from app.models.models import (
     ProjectProgress,
     SettingCategory,
     SettingEntry,
+    SourceImport,
+    Task,
 )
 
 MAX_TOOL_RESULT_CHARS = 12000
@@ -411,6 +413,101 @@ def openai_tool_definitions() -> list[dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_project_initialization",
+                "description": "派发「一句话初始化」后台任务：为空项目生成设定/角色/大纲/章节规划。项目已有内容时会失败。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_input": {
+                            "type": "string",
+                            "description": "一句话核心创意，必填",
+                        },
+                    },
+                    "required": ["user_input"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_generate_all_images",
+                "description": "派发批量出图任务（角色缺图补画 + 分镜面板图）。耗时，完成后看任务管理器。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_generate_all_characters",
+                "description": "派发批量角色立绘任务（会覆盖已有角色图）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_chapter_content",
+                "description": "派发章节正文生成任务。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chapter_id": {"type": "integer"},
+                        "user_input": {"type": "string", "description": "可选补充要求"},
+                    },
+                    "required": ["chapter_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_chapter_storyboard",
+                "description": "派发章节分镜生成任务（把章节正文改写成分镜）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chapter_id": {"type": "integer"},
+                        "user_input": {"type": "string", "description": "可选补充要求"},
+                    },
+                    "required": ["chapter_id"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "start_source_analysis",
+                "description": "派发原文分析任务（需已导入小说原文）。mode: continue|restart|all",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "description": "continue（默认）| restart | all",
+                        },
+                        "max_chapters": {
+                            "type": "integer",
+                            "description": "continue/restart 时最多分析章数，默认 50；mode=all 时忽略",
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
     ]
 
 
@@ -424,16 +521,25 @@ def execute_tool(session: Session, project_id: str, name: str, arguments: dict[s
         raise ToolError("工具参数必须是 JSON 对象")
     if name not in tool_names():
         raise ToolError(f"未知工具: {name}")
+    if name not in TOOL_HANDLERS:
+        raise ToolError(f"工具未注册 handler: {name}")
 
     handler: Callable[[Session, str, dict[str, Any]], Any] = TOOL_HANDLERS[name]
     try:
+        # 清理上一轮残留的派发队列
+        session.info.pop("assistant_dispatch_queue", None)
         result = handler(session, project_id, args)
+        queue = list(session.info.pop("assistant_dispatch_queue", []) or [])
         session.commit()
+        for task_id, task_type, payload in queue:
+            _enqueue_task(task_id, task_type, payload)
         return _dump_json({"ok": True, "tool": name, "result": result})
     except ToolError:
+        session.info.pop("assistant_dispatch_queue", None)
         session.rollback()
         raise
     except Exception as exc:
+        session.info.pop("assistant_dispatch_queue", None)
         session.rollback()
         raise ToolError(str(exc)) from exc
 
@@ -879,6 +985,251 @@ def _handle_update_progress(session: Session, project_id: str, args: dict[str, A
     return {"updated_fields": changed}
 
 
+def _has_running_task(session: Session, project_id: str, task_type: str) -> bool:
+    return (
+        session.exec(
+            select(Task).where(
+                Task.project_id == project_id,
+                Task.type == task_type,
+                Task.status.in_(["pending", "processing"]),
+            )
+        ).first()
+        is not None
+    )
+
+
+def _enqueue_task(task_id: str, task_type: str, payload: dict[str, Any]) -> None:
+    """在独立线程执行 run_task，避免阻塞助手 tool loop。"""
+    import threading
+
+    from app.services.task_dispatch import run_task
+
+    def _worker() -> None:
+        try:
+            run_task(task_id, task_type, payload)
+        except Exception:
+            # run_task / runner 自行写 failed；这里只防止线程异常吞掉
+            pass
+
+    threading.Thread(target=_worker, daemon=True, name=f"assistant-dispatch-{task_type}").start()
+
+
+def _handle_start_project_initialization(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    from app.routers.generation import has_initialized_content, has_running_project_initialization
+
+    _require_project(session, project_id)
+    user_input = str(args.get("user_input") or "").strip()
+    if not user_input:
+        raise ToolError("user_input 不能为空")
+    if has_initialized_content(session, project_id):
+        raise ToolError("项目已有设定/角色/章节/大纲/记忆，无法一句话初始化；请用空项目或手动编辑")
+    if has_running_project_initialization(session, project_id):
+        raise ToolError("项目初始化任务已在运行中")
+
+    project = session.get(Project, project_id)
+    project.story_input = user_input
+    session.add(project)
+
+    task = Task(
+        type="project_initialization",
+        status="pending",
+        project_id=project_id,
+        name="一句话初始化项目",
+        description="AI 正在生成设定、角色、关系、大纲和章节规划",
+        progress=0,
+        message="等待 AI 初始化...",
+        input_payload={"project_id": project_id, "user_input": user_input},
+    )
+    session.add(task)
+    session.flush()
+    task_id = task.id
+    payload = dict(task.input_payload or {})
+    # commit 由 execute_tool 统一完成；标记需在 commit 后入队
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task_id, "project_initialization", payload)
+    )
+    return {
+        "task_id": task_id,
+        "task_type": "project_initialization",
+        "message": "已派发一句话初始化任务，请在右下角任务面板查看进度",
+    }
+
+
+def _handle_start_generate_all_images(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    _require_project(session, project_id)
+    if _has_running_task(session, project_id, "image_generation"):
+        raise ToolError("已有批量出图任务在运行")
+    task = Task(
+        type="image_generation",
+        status="pending",
+        project_id=project_id,
+        name="Batch Generate Images",
+        description="Generating all storyboard images",
+        input_payload={"project_id": project_id},
+    )
+    session.add(task)
+    session.flush()
+    payload = dict(task.input_payload or {})
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task.id, "image_generation", payload)
+    )
+    return {
+        "task_id": task.id,
+        "task_type": "image_generation",
+        "message": "已派发批量出图任务",
+    }
+
+
+def _handle_start_generate_all_characters(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    _require_project(session, project_id)
+    if _has_running_task(session, project_id, "character_generation"):
+        raise ToolError("已有角色绘制任务在运行")
+    task = Task(
+        type="character_generation",
+        status="pending",
+        project_id=project_id,
+        name="Batch Generate Characters",
+        description="Generating all character design sheets",
+        input_payload={"project_id": project_id},
+    )
+    session.add(task)
+    session.flush()
+    payload = dict(task.input_payload or {})
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task.id, "character_generation", payload)
+    )
+    return {
+        "task_id": task.id,
+        "task_type": "character_generation",
+        "message": "已派发批量角色绘制任务",
+    }
+
+
+def _handle_start_chapter_content(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    chapter_id = int(args.get("chapter_id") or 0)
+    chapter = _chapter_in_project(session, project_id, chapter_id)
+    user_input = str(args.get("user_input") or "")
+    task = Task(
+        type="chapter_content_generation",
+        status="pending",
+        project_id=project_id,
+        name=f"生成章节正文: {chapter.title or chapter_id}",
+        description="AI 正在生成章节正文",
+        progress=0,
+        message="等待生成章节正文...",
+        scope_type="chapter",
+        scope_id=str(chapter_id),
+        input_payload={
+            "project_id": project_id,
+            "chapter_id": chapter_id,
+            "user_input": user_input,
+            "save_version": True,
+        },
+    )
+    session.add(task)
+    session.flush()
+    payload = dict(task.input_payload or {})
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task.id, "chapter_content_generation", payload)
+    )
+    return {
+        "task_id": task.id,
+        "task_type": "chapter_content_generation",
+        "chapter_id": chapter_id,
+        "message": "已派发章节正文生成任务",
+    }
+
+
+def _handle_start_chapter_storyboard(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    chapter_id = int(args.get("chapter_id") or 0)
+    chapter = _chapter_in_project(session, project_id, chapter_id)
+    user_input = str(args.get("user_input") or "")
+    task = Task(
+        type="chapter_storyboard",
+        status="pending",
+        project_id=project_id,
+        name=f"章节分镜: {chapter.title or chapter_id}",
+        description="AI 正在生成章节分镜",
+        progress=0,
+        message="等待生成章节分镜...",
+        scope_type="chapter",
+        scope_id=str(chapter_id),
+        input_payload={
+            "project_id": project_id,
+            "chapter_id": chapter_id,
+            "user_input": user_input,
+        },
+    )
+    session.add(task)
+    session.flush()
+    payload = dict(task.input_payload or {})
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task.id, "chapter_storyboard", payload)
+    )
+    return {
+        "task_id": task.id,
+        "task_type": "chapter_storyboard",
+        "chapter_id": chapter_id,
+        "message": "已派发章节分镜任务",
+    }
+
+
+def _handle_start_source_analysis(
+    session: Session, project_id: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    _require_project(session, project_id)
+    mode = str(args.get("mode") or "continue").strip() or "continue"
+    if mode not in {"continue", "restart", "all"}:
+        raise ToolError("mode 必须是 continue / restart / all")
+    source_import = session.exec(
+        select(SourceImport)
+        .where(SourceImport.project_id == project_id)
+        .order_by(SourceImport.created_at.desc())
+    ).first()
+    if not source_import:
+        raise ToolError("请先导入小说原文")
+    if _has_running_task(session, project_id, "source_analysis"):
+        raise ToolError("原文分析任务已在运行中")
+
+    max_chapters = None if mode == "all" else int(args.get("max_chapters") or 50)
+    task = Task(
+        type="source_analysis",
+        status="pending",
+        project_id=project_id,
+        name="原文分析",
+        description="AI 正在分析原文章节并生成全书摘要",
+        progress=0,
+        message="等待原文分析...",
+        input_payload={
+            "project_id": project_id,
+            "max_chapters": max_chapters,
+            "mode": mode,
+        },
+    )
+    session.add(task)
+    session.flush()
+    payload = dict(task.input_payload or {})
+    session.info.setdefault("assistant_dispatch_queue", []).append(
+        (task.id, "source_analysis", payload)
+    )
+    return {
+        "task_id": task.id,
+        "task_type": "source_analysis",
+        "mode": mode,
+        "message": "已派发原文分析任务",
+    }
+
+
 TOOL_HANDLERS: dict[str, Callable[[Session, str, dict[str, Any]], Any]] = {
     "get_project": _handle_get_project,
     "list_chapters": _handle_list_chapters,
@@ -899,6 +1250,12 @@ TOOL_HANDLERS: dict[str, Callable[[Session, str, dict[str, Any]], Any]] = {
     "update_outline": _handle_update_outline,
     "create_memory": _handle_create_memory,
     "update_progress": _handle_update_progress,
+    "start_project_initialization": _handle_start_project_initialization,
+    "start_generate_all_images": _handle_start_generate_all_images,
+    "start_generate_all_characters": _handle_start_generate_all_characters,
+    "start_chapter_content": _handle_start_chapter_content,
+    "start_chapter_storyboard": _handle_start_chapter_storyboard,
+    "start_source_analysis": _handle_start_source_analysis,
 }
 
 

@@ -174,7 +174,23 @@ def run_assistant_chat_task(task_id: str) -> None:
                             )
                             try:
                                 tool_result = execute_tool(session, project_id, name, arguments)
-                                tool_trace.append({"name": name, "ok": True, "args": arguments})
+                                trace_entry: dict[str, Any] = {
+                                    "name": name,
+                                    "ok": True,
+                                    "args": arguments,
+                                }
+                                # start_* 结果带上 task_id，方便前端刷新任务面板
+                                try:
+                                    parsed = json.loads(tool_result)
+                                    result_body = parsed.get("result") if isinstance(parsed, dict) else None
+                                    if isinstance(result_body, dict) and result_body.get("task_id"):
+                                        trace_entry["result"] = {
+                                            "task_id": result_body.get("task_id"),
+                                            "task_type": result_body.get("task_type"),
+                                        }
+                                except (json.JSONDecodeError, TypeError):
+                                    pass
+                                tool_trace.append(trace_entry)
                             except ToolError as exc:
                                 tool_result = json.dumps(
                                     {"ok": False, "error": str(exc)},

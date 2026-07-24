@@ -88,7 +88,12 @@ const props = defineProps({
   projectId: { type: String, required: true },
 })
 
-const emit = defineEmits(['update:modelValue', 'task-started', 'open-terminal'])
+const emit = defineEmits(['update:modelValue', 'task-started', 'open-terminal', 'project-mutated'])
+
+const WRITE_TOOL_PREFIXES = ['create_', 'update_']
+const isWriteTool = (name) =>
+  typeof name === 'string' && WRITE_TOOL_PREFIXES.some((p) => name.startsWith(p))
+const isStartTool = (name) => typeof name === 'string' && name.startsWith('start_')
 
 const visible = computed({
   get: () => props.modelValue,
@@ -212,14 +217,38 @@ const pollTask = async () => {
       ]
     }
     if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+      const toolCalls = Array.isArray(result.tool_calls) ? result.tool_calls : []
+      const writeTools = [
+        ...new Set(toolCalls.map((c) => c?.name).filter(isWriteTool)),
+      ]
+      const startTools = toolCalls.filter((c) => isStartTool(c?.name))
+      const dispatchedTaskIds = [
+        ...new Set(
+          startTools
+            .map((c) => c?.result?.task_id || c?.result?.taskId)
+            .filter(Boolean)
+        ),
+      ]
       stopPoll()
       activeTaskId.value = ''
       streamPreview.value = ''
       streamChars.value = 0
+      activeToolNames.value = []
       await fetchMessages()
       await scrollToBottom()
       if (task.status === 'failed') {
         ElMessage.error(task.message || '助手回复失败')
+      } else if (task.status === 'completed') {
+        if (writeTools.length) {
+          emit('project-mutated', {
+            task_id: task.id,
+            tool_names: writeTools,
+          })
+        }
+        // start_* 派发的后台任务：刷新右下角任务面板轮询
+        if (startTools.length) {
+          emit('task-started', dispatchedTaskIds[0] || task.id)
+        }
       }
     }
   } catch (error) {
