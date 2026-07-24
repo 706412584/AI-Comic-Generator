@@ -738,6 +738,10 @@ Include Front View, Side View, and detailed clothing/accessories.
 Ensure the character's expression and pose reflect their personality: {personality}.
 """
             
+            task.progress = 10
+            task.message = "正在等待上游图片模型生成立绘，通常需要数分钟..."
+            session.add(task)
+            session.commit()
             log_task_event(session, task_id, f"Calling AI service for character {char.name}...")
             start_time = time.time()
             try:
@@ -769,7 +773,10 @@ Ensure the character's expression and pose reflect their personality: {personali
             log_task_event(session, task_id, f"Character task {task_id} failed: {e}")
             traceback.print_exc()
             task.status = "failed"
-            task.message = str(e)
+            error_message = str(e)
+            if "HTTP 504" in error_message or "Upstream request failed" in error_message:
+                error_message = "图片模型已配置且可访问，但上游图片生成网关超时（HTTP 504）。请稍后重试；这不是本地 API Key 或模型配置缺失。"
+            task.message = error_message
             session.add(task)
             session.commit()
 
@@ -1315,6 +1322,8 @@ def parse_ai_json_object(generated: str, required_key: str | None = None) -> dic
 
 
 def generate_project_initialization_task(task_id: str, project_id: str, user_input: str):
+    from app.agents.project_initialization_agent import ProjectInitializationAgent
+    from app.agents.runtime import AgentRuntime
     from app.core.database import engine
 
     with Session(engine) as session:
@@ -1323,209 +1332,15 @@ def generate_project_initialization_task(task_id: str, project_id: str, user_inp
             logger.error(f"Task {task_id} not found")
             return
 
-        task.status = "processing"
-        task.progress = 5
-        task.message = "准备初始化项目..."
-        session.add(task)
-        session.commit()
-
         try:
-            project = crud_project.get_project(session, project_id)
-            if not project:
-                raise ValueError("Project not found")
-
-            set_task_progress(session, task_id, 10, "AI 正在理解一句话创意...")
-            system_prompt, prompt = build_project_initialization_prompt(user_input)
-            generated = AIService(session).generate_text(system_prompt, prompt)
-            try:
-                payload = json.loads(generated)
-            except json.JSONDecodeError:
-                blocks = extract_json_blocks(generated)
-                payload = next((block for block in blocks if isinstance(block, dict) and "project" in block), None)
-            if not isinstance(payload, dict):
-                raise ValueError("AI 未返回可解析的项目初始化 JSON")
-            if has_initialized_content(session, project_id):
-                raise ValueError("项目已完成初始化，取消重复写入")
-
-            set_task_progress(session, task_id, 25, "正在写入项目基础信息...")
-            project.story_input = user_input
-            session.add(project)
-            project_data = normalize_dict(payload.get("project"))
-            project.title = str(project_data.get("title") or project.title)
-            project.description = str(project_data.get("description") or project.description or "")
-            project.theme = str(project_data.get("theme") or project.theme or "")
-            project.language = str(project_data.get("language") or project.language or "zh-CN")
-            project.workflow_mode = "novel_comic"
-            project.memory_enabled = True
-            project.outline_enabled = True
-            project.setting_mode = "advanced"
-            project.updated_at = datetime.utcnow()
-            session.add(project)
-            logger.info("正在生成世界观、境界和组织设定...")
-            category_map = {}
-            seen_setting_titles = set()
-            for index, item in enumerate(normalize_list(payload.get("settings"))):
-                item = normalize_dict(item)
-                setting_title = str(item.get("title") or f"设定 {index + 1}").strip()
-                dedupe_key = setting_title.lower()
-                if dedupe_key in seen_setting_titles:
-                    continue
-                seen_setting_titles.add(dedupe_key)
-                category_name = str(item.get("category") or "通用设定")
-                category = category_map.get(category_name)
-                if not category:
-                    category = SettingCategory(project_id=project_id, name=category_name, description=f"AI 初始化生成的{category_name}", sort_order=len(category_map))
-                    session.add(category)
-                    session.flush()
-                    category_map[category_name] = category
-                session.add(SettingEntry(
-                    project_id=project_id,
-                    category_id=category.id,
-                    title=setting_title,
-                    content=str(item.get("content") or ""),
-                    tags=normalize_list(item.get("tags")),
-                    importance=safe_int(item.get("importance"), 3),
-                ))
-            logger.info("正在生成角色和默认服饰...")
-            character_map = {}
-            for item in normalize_list(payload.get("characters")):
-                item = normalize_dict(item)
-                name = str(item.get("name") or "").strip()
-                if not name:
-                    continue
-                if name in character_map:
-                    continue
-                character = Character(
-                    project_id=project_id,
-                    name=name,
-                    summary=str(item.get("summary") or ""),
-                    status=str(item.get("status") or "active"),
-                    aliases=normalize_list(item.get("aliases")),
-                    data=normalize_dict(item.get("data")),
-                )
-                session.add(character)
-                session.flush()
-                character_map[name] = character
-
-                default_outfit_id = None
-                for outfit_data in normalize_list(item.get("outfits")):
-                    outfit_data = normalize_dict(outfit_data)
-                    outfit = CharacterOutfit(
-                        project_id=project_id,
-                        character_id=character.id,
-                        name=str(outfit_data.get("name") or "默认服饰"),
-                        description=str(outfit_data.get("description") or "AI 初始化生成的默认服饰"),
-                        scene=outfit_data.get("scene"),
-                        colors=outfit_data.get("colors"),
-                        materials=outfit_data.get("materials"),
-                        accessories=outfit_data.get("accessories"),
-                        state=outfit_data.get("state"),
-                        is_default=bool(outfit_data.get("is_default", default_outfit_id is None)),
-                    )
-                    session.add(outfit)
-                    session.flush()
-                    if outfit.is_default and default_outfit_id is None:
-                        default_outfit_id = outfit.id
-                if default_outfit_id:
-                    character.default_outfit_id = default_outfit_id
-                    session.add(character)
-            logger.info("正在生成角色关系...")
-            for item in normalize_list(payload.get("relationships")):
-                item = normalize_dict(item)
-                source = character_map.get(str(item.get("source") or ""))
-                target = character_map.get(str(item.get("target") or ""))
-                if not source or not target or source.id == target.id:
-                    continue
-                session.add(CharacterRelationship(
-                    project_id=project_id,
-                    source_character_id=source.id,
-                    target_character_id=target.id,
-                    relationship_type=str(item.get("relationship_type") or "关联"),
-                    description=item.get("description"),
-                    intensity=safe_int(item.get("intensity"), 3),
-                    tags=normalize_list(item.get("tags")),
-                ))
-            logger.info("正在生成大纲和章节规划...")
-            for index, item in enumerate(normalize_list(payload.get("outlines"))):
-                item = normalize_dict(item)
-                session.add(Outline(
-                    project_id=project_id,
-                    scope=str(item.get("scope") or "project"),
-                    title=str(item.get("title") or f"大纲 {index + 1}"),
-                    content=str(item.get("content") or ""),
-                    sort_order=safe_int(item.get("sort_order"), index),
-                ))
-
-            first_chapter_id = None
-            for item in normalize_list(payload.get("chapters")):
-                item = normalize_dict(item)
-                chapter = Chapter(
-                    project_id=project_id,
-                    sequence=safe_int(item.get("sequence"), 1),
-                    title=str(item.get("title") or "未命名章节"),
-                    summary=item.get("summary"),
-                    goal=item.get("goal"),
-                    conflict=item.get("conflict"),
-                    current_location=item.get("current_location"),
-                    current_time=item.get("current_time"),
-                    pov_character=item.get("pov_character"),
-                    status="draft",
-                )
-                session.add(chapter)
-                session.flush()
-                if first_chapter_id is None:
-                    first_chapter_id = chapter.id
-                for task_index, chapter_task in enumerate(normalize_list(item.get("tasks"))):
-                    chapter_task = normalize_dict(chapter_task)
-                    session.add(ChapterTask(
-                        project_id=project_id,
-                        chapter_id=chapter.id,
-                        title=str(chapter_task.get("title") or f"章节任务 {task_index + 1}"),
-                        description=chapter_task.get("description"),
-                        type=chapter_task.get("type"),
-                        sort_order=safe_int(chapter_task.get("sort_order"), task_index),
-                    ))
-            logger.info("正在写入初始记忆和项目进度...")
-            for item in normalize_list(payload.get("memories")):
-                item = normalize_dict(item)
-                content = str(item.get("content") or "").strip()
-                if content:
-                    session.add(MemoryEntry(
-                        project_id=project_id,
-                        scope=str(item.get("scope") or "project"),
-                        content=content,
-                        memory_type=str(item.get("memory_type") or "event"),
-                        tags=normalize_list(item.get("tags")),
-                        importance=safe_int(item.get("importance"), 3),
-                        source_type="project_initialization",
-                        source_id=task_id,
-                    ))
-
-            progress_data = normalize_dict(payload.get("progress"))
-            progress = session.exec(select(ProjectProgress).where(ProjectProgress.project_id == project_id)).first()
-            if not progress:
-                progress = ProjectProgress(project_id=project_id)
-            progress.current_chapter_id = first_chapter_id or progress.current_chapter_id
-            progress.current_arc = progress_data.get("current_arc")
-            progress.current_location = progress_data.get("current_location")
-            progress.current_time = progress_data.get("current_time")
-            progress.main_conflict = progress_data.get("main_conflict")
-            progress.active_threads = normalize_list(progress_data.get("active_threads"))
-            progress.pending_hooks = normalize_list(progress_data.get("pending_hooks"))
-            progress.notes = progress_data.get("notes")
-            progress.updated_at = datetime.utcnow()
-            session.add(progress)
-
-            if first_chapter_id:
-                project.current_chapter_id = first_chapter_id
-                session.add(project)
-            session.commit()
-            finish_task(task_id, "completed", "项目初始化完成", {
-                "settings": len(normalize_list(payload.get("settings"))),
-                "characters": len(character_map),
-                "chapters": len(normalize_list(payload.get("chapters"))),
-                "outlines": len(normalize_list(payload.get("outlines"))),
-            })
+            agent = ProjectInitializationAgent(session)
+            runtime_result = AgentRuntime(session, task_id, agent, {
+                "project_id": project_id,
+                "user_input": user_input,
+            }).run()
+            if runtime_result.get("status") == "cancelled":
+                return
+            finish_task(task_id, "completed", "项目初始化完成", runtime_result.get("summary") or {})
         except Exception as e:
             session.rollback()
             logger.error(f"Project initialization task {task_id} failed: {e}")

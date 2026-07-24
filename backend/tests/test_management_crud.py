@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from app.core.database import engine, init_db
 from app.main import app
-from app.models.models import Character, CharacterOutfit, CharacterRelationship, CharacterState, Chapter, ChapterTask, ChapterVersion, MemoryEntry, Outline, Project, ProjectProgress, SettingEntry, StoryboardItem, Task
+from app.models.models import AgentRun, Character, CharacterOutfit, CharacterRelationship, CharacterState, Chapter, ChapterTask, ChapterVersion, MemoryEntry, Outline, Project, ProjectProgress, SettingEntry, StoryboardItem, Task
 from app.routers.generation import build_panel_outfit_prompt
 
 
@@ -51,7 +51,7 @@ class ManagementCrudTest(unittest.TestCase):
         }
         '''
 
-        with patch('app.routers.generation.AIService.generate_text', return_value=ai_payload):
+        with patch('app.agents.project_initialization_agent.AIService.generate_text_stream', side_effect=lambda _system, _prompt, callback: (callback(ai_payload), ai_payload)[1]):
             response = self.client.post(
                 f'/api/v1/generate/project-initialize/{self.project_id}',
                 json={'user_input': '赛博修仙世界，一个失忆少年和机械狐妖寻找天庭遗迹'},
@@ -66,6 +66,12 @@ class ManagementCrudTest(unittest.TestCase):
             self.assertEqual(task.progress, 100)
             self.assertIn('项目初始化完成', task.message)
             self.assertTrue(any('AI 正在理解一句话创意' in log for log in task.logs))
+            agent_run = session.exec(select(AgentRun).where(AgentRun.task_id == task_id)).first()
+            self.assertIsNotNone(agent_run)
+            self.assertEqual(agent_run.agent_name, 'project_initialization')
+            self.assertEqual(agent_run.status, 'completed')
+            self.assertEqual(agent_run.total_steps, 3)
+            self.assertGreater(agent_run.state_payload['generate_skeleton_stream']['received_chars'], 0)
 
             project = session.get(Project, self.project_id)
             self.assertEqual(project.title, '机械狐仙')
@@ -115,7 +121,7 @@ class ManagementCrudTest(unittest.TestCase):
         }
         '''
 
-        with patch('app.routers.generation.AIService.generate_text', return_value=ai_payload):
+        with patch('app.agents.project_initialization_agent.AIService.generate_text_stream', side_effect=lambda _system, _prompt, callback: (callback(ai_payload), ai_payload)[1]):
             response = self.client.post(
                 f'/api/v1/generate/project-initialize/{self.project_id}',
                 json={'user_input': '东方玄幻世界，一个失灵根少年重建剑道'},
@@ -154,7 +160,7 @@ class ManagementCrudTest(unittest.TestCase):
         self.assertIn('空项目', response.json()['detail'])
 
     def test_project_initialization_non_json_failure_writes_no_generated_content(self):
-        with patch('app.routers.generation.AIService.generate_text', return_value='not json at all'):
+        with patch('app.agents.project_initialization_agent.AIService.generate_text_stream', side_effect=lambda _system, _prompt, callback: (callback('not json at all'), 'not json at all')[1]):
             response = self.client.post(
                 f'/api/v1/generate/project-initialize/{self.project_id}',
                 json={'user_input': '测试失败'},
