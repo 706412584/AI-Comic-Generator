@@ -63,10 +63,7 @@ class AIService:
                 content = m.get("content") or ""
                 if content:
                     user_parts.append(f"[{role}] {content}")
-            text = self.generate_text(
-                "\n\n".join(system_parts) or "You are a helpful assistant.",
-                "\n".join(user_parts),
-            )
+            text = self.generate_text("\n\n".join(system_parts) or "You are a helpful assistant.", "\n".join(user_parts))
             return {"role": "assistant", "content": text, "tool_calls": None}
 
         payload: dict = {
@@ -426,7 +423,7 @@ class AIService:
             "size": size,
         }
 
-        data = self._post_openai_compatible_with_fallbacks(config, "/images/generations", [full_payload, minimal_payload], timeout=600)
+        data = self._post_openai_compatible_with_fallbacks(config, "/images/generations", [minimal_payload, full_payload], timeout=600)
         try:
             first_image = data["data"][0]
         except (KeyError, IndexError, TypeError):
